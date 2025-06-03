@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  // runApp(const MyApp());
   runApp(
     ChangeNotifierProvider(
       create: (context) => LoginFormData(),
@@ -32,8 +31,6 @@ class LoginFormData extends ChangeNotifier {
   }
 }
 
-
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -44,48 +41,11 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      // home: const LoginPage(),
-      home: SplashScreen(), // start with splash screen
+      home: const LoginPage(),
     );
   }
 }
 
-//for splash screen
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // Delay for 3 seconds before navigating to LoginScreen
-    Future.delayed(const Duration(seconds: 3), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-      );
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.blue,
-      body: Center(
-        child: Text(
-          'Welcome to StoraNova!',
-          style: TextStyle(fontSize: 30, color: Colors.white),
-        ),
-      ),
-    );
-  }
-}
-
-//for login page
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
 
@@ -257,31 +217,28 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             // Handle Google login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_google.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                         IconButton(
                           onPressed: () {
                             // Handle Apple login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_apple.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                         IconButton(
                           onPressed: () {
                             // Handle Facebook login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_facebook.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                       ],
                     ),
