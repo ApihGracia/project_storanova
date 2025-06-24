@@ -2,33 +2,46 @@ import 'package:flutter/material.dart';
 // import 'package:provider/provider.dart';
 
 void main() {
-  runApp(const MyApp());
+  // runApp(const MyApp());
+  runApp(CustDashboard());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+// class MyApp extends StatelessWidget {
+//   const MyApp({Key? key}) : super(key: key);
 
+//   @override
+//   Widget build(BuildContext context) {
+//     return MaterialApp(
+//       title: 'StoraNova App',
+//       theme: ThemeData(
+//         primarySwatch: Colors.blue,
+//         scaffoldBackgroundColor: const Color(0xFFB4D4FF),
+//       ),
+//       home: const MyHomePage(),
+//     );
+//   }
+// }
+
+class CustDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'StoraNova App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: const Color(0xFFB4D4FF),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Customer Dashboard')),
+      body: const Center(
+        child: Text('Welcome to the Customer Dashboard!'),
       ),
-      home: const MyHomePage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key}) : super(key: key);
+class CustHomePage extends StatefulWidget {
+  const CustHomePage({Key? key}) : super(key: key);
 
   @override
-  _MyHomePageState createState() => _MyHomePageState();
+  _CustHomePageState createState() => _CustHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _CustHomePageState extends State<CustHomePage> {
   int _currentIndex = 2; // Start at "Home"
 
   @override

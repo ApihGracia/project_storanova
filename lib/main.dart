@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'owner_dashboard.dart';
+import 'cust_dashboard.dart';
+
 
 void main() {
-  // runApp(const MyApp());
   runApp(
     ChangeNotifierProvider(
       create: (context) => LoginFormData(),
@@ -15,6 +17,7 @@ class LoginFormData extends ChangeNotifier {
   String username = '';
   String password = '';
   bool rememberMe = false;
+
 
   void setUsername(String value) {
     username = value;
@@ -32,8 +35,6 @@ class LoginFormData extends ChangeNotifier {
   }
 }
 
-
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -44,50 +45,60 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      // home: const LoginPage(),
-      home: SplashScreen(), // start with splash screen
+      home: const LoginPage(),
     );
   }
 }
 
-//for splash screen
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+class User {
+  final String username;
+  final String password;
+  final String role;
 
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  User({required this.username, required this.password, required this.role});
 }
 
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    // Delay for 3 seconds before navigating to LoginScreen
-    Future.delayed(const Duration(seconds: 3), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginPage()),
-      );
-    });
-  }
+// Mock user data
+final List<User> mockUsers = [
+  User(username: 'admin', password: 'admin123', role: 'admin'),
+  User(username: 'user', password: 'user123', role: 'user'),
+];
 
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.blue,
-      body: Center(
-        child: Text(
-          'Welcome to StoraNova!',
-          style: TextStyle(fontSize: 30, color: Colors.white),
-        ),
-      ),
-    );
-  }
-}
-
-//for login page
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
+
+  void _handleLogin(BuildContext context) {
+    final formData = Provider.of<LoginFormData>(context, listen: false);
+    final user = mockUsers.firstWhere(
+      (u) => u.username == formData.username && u.password == formData.password,
+      orElse: () => User(username: '', password: '', role: ''),
+    );
+
+    if (user.role == 'admin') {
+      // Navigate or show admin UI
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Welcome, Admin!')),
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => OwnerHomePage()),
+      ); // Navigate to admin page
+    } else if (user.role == 'user') {
+      // Navigate or show user UI
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Welcome, User!')),
+      );
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => CustHomePage()),
+      ); // Navigate to user page
+    } else {
+      // Invalid credentials
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid username or password')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -196,13 +207,7 @@ class LoginPage extends StatelessWidget {
                     const SizedBox(height: 20),
                     // Login Button
                     ElevatedButton(
-                      onPressed: () {
-                        // Handle login logic here
-                        String username = Provider.of<LoginFormData>(context, listen: false).username;
-                        String password = Provider.of<LoginFormData>(context, listen: false).password;
-                        bool rememberMe = Provider.of<LoginFormData>(context, listen: false).rememberMe;
-                        print('Username: $username, Password: $password, Remember Me: $rememberMe');
-                      },
+                      onPressed: () => _handleLogin(context),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
@@ -257,31 +262,28 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             // Handle Google login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_google.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                         IconButton(
                           onPressed: () {
                             // Handle Apple login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_apple.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                         IconButton(
                           onPressed: () {
                             // Handle Facebook login logic here
                           },
-                          icon: Image.asset(
-                            'assets/images/logo_facebook.jpg',
-                            width: 24,
-                            height: 24,
-                          ),
+                          icon: Image.network(
+                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                              width: 24,
+                              height: 24),
                         ),
                       ],
                     ),
