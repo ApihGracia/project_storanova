@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'owner_dashboard.dart';
 import 'cust_dashboard.dart';
 
-
 void main() {
   runApp(
     ChangeNotifierProvider(
@@ -45,7 +44,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const LoginPage(),
+      home: const SplashToLogin(),
     );
   }
 }
@@ -63,6 +62,65 @@ final List<User> mockUsers = [
   User(username: 'admin', password: 'admin123', role: 'admin'),
   User(username: 'user', password: 'user123', role: 'user'),
 ];
+
+class SplashToLogin extends StatefulWidget {
+  const SplashToLogin({super.key});
+
+  @override
+  State<SplashToLogin> createState() => _SplashToLoginState();
+}
+
+class _SplashToLoginState extends State<SplashToLogin> {
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(const Duration(seconds: 3), () {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const SplashScreen(); // Show splash for a few seconds
+  }
+}
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Delay for 3 seconds before navigating to LoginScreen
+    Future.delayed(const Duration(seconds: 3), () {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginPage()),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Colors.blue,
+      body: Center(
+        child: Text(
+          'Welcome to StoraNova!',
+          style: TextStyle(fontSize: 30, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -262,8 +320,8 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             // Handle Google login logic here
                           },
-                          icon: Image.network(
-                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          icon: Image.asset(
+                              'assets/images/logo_google.jpg',
                               width: 24,
                               height: 24),
                         ),
@@ -271,8 +329,8 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             // Handle Apple login logic here
                           },
-                          icon: Image.network(
-                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          icon: Image.asset(
+                              'assets/images/logo_apple.jpg',
                               width: 24,
                               height: 24),
                         ),
@@ -280,8 +338,8 @@ class LoginPage extends StatelessWidget {
                           onPressed: () {
                             // Handle Facebook login logic here
                           },
-                          icon: Image.network(
-                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          icon: Image.asset(
+                              'assets/images/logo_facebook.jpg',
                               width: 24,
                               height: 24),
                         ),
