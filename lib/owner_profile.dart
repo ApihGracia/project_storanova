@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'owner_dashboard.dart';
-import 'dart:html' as html; // For Flutter web image picking
+import 'owner_dashboard.dart'; // For Flutter web image picking
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:io';
 
 void main() {
   runApp(const MyApp());
@@ -152,83 +155,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _selectedImageUrlPreview = null;
     });
   }
-  // Image picking and confirmation logic for Flutter web (like customer profile)
+
+  // Image picking and confirmation logic for Flutter web and mobile (cross-platform)
   Future<void> _pickImage() async {
     setState(() { _isUploadingImage = true; });
-    final html.FileUploadInputElement uploadInput = html.FileUploadInputElement();
-    uploadInput.accept = 'image/*';
-    uploadInput.click();
-    uploadInput.onChange.listen((event) async {
-      final file = uploadInput.files?.first;
-      if (file != null) {
-        final reader = html.FileReader();
-        reader.readAsArrayBuffer(file);
-        reader.onLoadEnd.listen((event) async {
-          final bytes = reader.result as Uint8List;
-          // Show confirmation dialog with preview
-          final urlCreator = html.Url.createObjectUrl(file);
-          final confirmed = await showDialog<bool>(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text('Confirm Image'),
-              content: Image.network(urlCreator, width: 200, height: 200),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use Image')),
-              ],
-            ),
-          );
-          html.Url.revokeObjectUrl(urlCreator);
-          if (confirmed == true) {
-            setState(() {
-              _selectedImageBytes = bytes;
-              _isUploadingImage = false;
-            });
-          } else {
-            setState(() {
-              _selectedImageBytes = null;
-              _isUploadingImage = false;
-            });
-          }
-        });
-      } else {
-        // User cancelled file dialog, reset loading state
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) {
+      setState(() { _isUploadingImage = false; });
+      return;
+    }
+    if (kIsWeb) {
+      try {
+        final imageBytes = await pickedFile.readAsBytes();
+        // Show confirmation dialog with preview
+        bool? confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Confirm Image'),
+            content: Image.memory(imageBytes, width: 200, height: 200),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use Image')),
+            ],
+          ),
+        );
+        if (confirmed == true) {
+          setState(() {
+            _selectedImageBytes = imageBytes;
+            _isUploadingImage = false;
+          });
+        } else {
+          setState(() {
+            _selectedImageBytes = null;
+            _isUploadingImage = false;
+          });
+        }
+      } catch (e) {
         setState(() { _isUploadingImage = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error preparing image: $e')),
+        );
       }
-    });
-    // Also handle the case where the user closes the dialog without triggering onChange
-    // (workaround: set a short timeout to reset loading if no file is picked)
-    Future.delayed(const Duration(seconds: 2), () {
-      if (uploadInput.files == null || uploadInput.files!.isEmpty) {
-        if (mounted) setState(() { _isUploadingImage = false; });
+    } else {
+      try {
+        final file = File(pickedFile.path);
+        final fileSize = await file.length();
+        if (fileSize > 20 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Image must be below 20MB.')),
+          );
+          setState(() { _isUploadingImage = false; });
+          return;
+        }
+        // Show confirmation dialog with preview
+        bool? confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Confirm Image'),
+            content: Image.file(file, width: 200, height: 200),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use Image')),
+            ],
+          ),
+        );
+        if (confirmed == true) {
+          final bytes = await file.readAsBytes();
+          setState(() {
+            _selectedImageBytes = bytes;
+            _isUploadingImage = false;
+          });
+        } else {
+          setState(() {
+            _selectedImageBytes = null;
+            _isUploadingImage = false;
+          });
+        }
+      } catch (e) {
+        setState(() { _isUploadingImage = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error preparing image: $e')),
+        );
       }
-    });
+    }
   }
 
   Future<String?> _uploadImageToCloudinary(Uint8List imageBytes) async {
-    // Use your actual Cloudinary upload preset and cloud name
     const String uploadPreset = 'StoraNova';
     const String cloudName = 'dxeejx1hq';
     final url = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
-    final request = html.HttpRequest();
-    final formData = html.FormData();
-    formData.appendBlob('file', html.Blob([imageBytes]), 'profile_image.png');
-    formData.append('upload_preset', uploadPreset);
+    final request = http.MultipartRequest('POST', url)
+      ..fields['upload_preset'] = uploadPreset
+      ..files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'profile_image.png'));
     try {
-      request.open('POST', url.toString());
-      final completer = Completer<String?>();
-      request.onLoadEnd.listen((event) {
-        if (request.status == 200) {
-          final response = json.decode(request.responseText!);
-          completer.complete(response['secure_url'] as String?);
-        } else {
-          // Print Cloudinary error for debugging
-          print('Cloudinary error: \\nStatus: \\${request.status}\\nResponse: \\${request.responseText}');
-          completer.complete(null);
-        }
-      });
-      request.send(formData);
-      return await completer.future;
+      final response = await request.send();
+      final respStr = await response.stream.bytesToString();
+      if (response.statusCode == 200) {
+        final data = jsonDecode(respStr);
+        return data['secure_url'];
+      } else {
+        print('Cloudinary upload failed: \\${response.statusCode}');
+        print('Cloudinary error response: \\${respStr}');
+        return null;
+      }
     } catch (e) {
       print('Cloudinary upload exception: $e');
       return null;
