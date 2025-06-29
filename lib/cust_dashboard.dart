@@ -1,26 +1,13 @@
 import 'package:flutter/material.dart';
+import 'main.dart';
+// StoraNovaNavBar is now available from main.dart
+import 'cust_profile.dart';
 // import 'package:provider/provider.dart';
 
 void main() {
   // runApp(const MyApp());
   runApp(CustDashboard());
 }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({Key? key}) : super(key: key);
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       title: 'StoraNova App',
-//       theme: ThemeData(
-//         primarySwatch: Colors.blue,
-//         scaffoldBackgroundColor: const Color(0xFFB4D4FF),
-//       ),
-//       home: const MyHomePage(),
-//     );
-//   }
-// }
 
 class CustDashboard extends StatelessWidget {
   @override
@@ -179,36 +166,20 @@ class _CustHomePageState extends State<CustHomePage> {
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: 'Explore',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite_border),
-            label: 'Wishlist',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_none),
-            label: 'Notification',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: 'Profile',
-          ),
-        ],
+      bottomNavigationBar: StoraNovaNavBar(
         currentIndex: _currentIndex,
-        selectedItemColor: Colors.blue,
-        unselectedItemColor: Colors.grey,
         onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
+          if (index == _currentIndex) return;
+          setState(() => _currentIndex = index);
+          if (index == 4) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const ProfileScreen()),
+            );
+          } else if (index == 2) {
+            // Already on dashboard, do nothing
+          }
+          // Add navigation for other tabs as needed
         },
       ),
     );
