@@ -62,4 +62,24 @@ class DatabaseService {
     }
     return null;
   }
+
+  // CREATE: Register a new house for owner with username as document ID
+  Future<void> createHouse({
+    required String username,
+    required String address,
+    required String phone,
+    required List<Map<String, dynamic>> prices,
+    required DateTime availableFrom,
+    required DateTime availableTo,
+  }) async {
+    final houseData = {
+      'owner': username,
+      'address': address,
+      'phone': phone,
+      'prices': prices,
+      'availableFrom': availableFrom.toIso8601String(),
+      'availableTo': availableTo.toIso8601String(),
+    };
+    await FirebaseFirestore.instance.collection('Houses').doc(username).set(houseData);
+  }
 }

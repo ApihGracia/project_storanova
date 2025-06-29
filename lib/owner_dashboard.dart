@@ -1,22 +1,59 @@
 import 'package:flutter/material.dart';
 import 'owner_profile.dart';
-import 'main.dart'; // Import main.dart so StoraNovaNavBar is available
+import 'main.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'database.dart';
 
 void main() {
-  // runApp(const MyApp());
   runApp(OwnerDashboard());
 }
 
 class OwnerDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Owner Dashboard')),
-      body: const Center(
-        child: Text('Welcome to the Owner Dashboard!'),
-      ),
+    return MaterialApp(
+      home: OwnerHomePage(),
+      debugShowCheckedModeBanner: false,
     );
   }
+}
+
+class House {
+  final String id;
+  final String address;
+  final String phone;
+  final List<Map<String, dynamic>> prices;
+  final DateTime availableFrom;
+  final DateTime availableTo;
+
+  House({
+    required this.id,
+    required this.address,
+    required this.phone,
+    required this.prices,
+    required this.availableFrom,
+    required this.availableTo,
+  });
+
+  factory House.fromMap(String id, Map<String, dynamic> data) {
+    return House(
+      id: id,
+      address: data['address'] ?? '',
+      phone: data['phone'] ?? '',
+      prices: List<Map<String, dynamic>>.from(data['prices'] ?? []),
+      availableFrom: DateTime.parse(data['availableFrom'] ?? DateTime.now().toIso8601String()),
+      availableTo: DateTime.parse(data['availableTo'] ?? DateTime.now().toIso8601String()),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'address': address,
+    'phone': phone,
+    'prices': prices,
+    'availableFrom': availableFrom.toIso8601String(),
+    'availableTo': availableTo.toIso8601String(),
+  };
 }
 
 class OwnerHomePage extends StatefulWidget {
@@ -27,7 +64,157 @@ class OwnerHomePage extends StatefulWidget {
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 2; // Start at "Home"
+  int _currentIndex = 2;
+  House? _house;
+  bool _isLoading = true;
+  bool _showHouseForm = false;
+  final _houseFormKey = GlobalKey<FormState>();
+  final TextEditingController _houseAddressController = TextEditingController();
+  final TextEditingController _housePhoneController = TextEditingController();
+  List<Map<String, dynamic>> _prices = [];
+  String _priceUnit = 'per day';
+  DateTime? _availableFrom;
+  DateTime? _availableTo;
+  final DatabaseService _db = DatabaseService();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHouse();
+  }
+
+  Future<String?> _getUsernameFromFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    // Try to get username from AppUsers by UID, then by email, then by displayName
+    DocumentSnapshot? userDoc;
+    if (user.uid.isNotEmpty) {
+      userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(user.uid).get();
+      if (userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
+        return (userDoc.data() as Map<String, dynamic>)['username'];
+      }
+    }
+    if (user.email != null && user.email!.isNotEmpty) {
+      final query = await FirebaseFirestore.instance.collection('AppUsers').where('email', isEqualTo: user.email).limit(1).get();
+      if (query.docs.isNotEmpty && query.docs.first.data()['username'] != null) {
+        return query.docs.first.data()['username'];
+      }
+    }
+    if (user.displayName != null && user.displayName!.isNotEmpty) {
+      userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(user.displayName).get();
+      if (userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
+        return (userDoc.data() as Map<String, dynamic>)['username'];
+      }
+      return user.displayName;
+    }
+    return null;
+  }
+
+  Future<void> _fetchHouse() async {
+    setState(() { _isLoading = true; });
+    final username = await _getUsernameFromFirestore();
+    if (username == null) {
+      setState(() { _isLoading = false; });
+      return;
+    }
+    final doc = await FirebaseFirestore.instance.collection('Houses').doc(username).get();
+    setState(() {
+      _house = doc.exists ? House.fromMap(doc.id, doc.data()!) : null;
+      _isLoading = false;
+    });
+  }
+
+  void _showRegisterHouseForm({House? house}) {
+    setState(() {
+      _showHouseForm = true;
+      if (house != null) {
+        _houseAddressController.text = house.address;
+        _housePhoneController.text = house.phone;
+        _prices = List<Map<String, dynamic>>.from(house.prices);
+        _priceUnit = house.prices.isNotEmpty ? house.prices[0]['unit'] : 'per day';
+        _availableFrom = house.availableFrom;
+        _availableTo = house.availableTo;
+      } else {
+        _houseAddressController.text = '';
+        _housePhoneController.text = '';
+        _prices = [];
+        _priceUnit = 'per day';
+        _availableFrom = null;
+        _availableTo = null;
+      }
+    });
+  }
+
+  Future<void> _autofillAddressFromProfile() async {
+    final username = await _getUsernameFromFirestore();
+    if (username == null) return;
+    final userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(username).get();
+    final profile = userDoc.data();
+    setState(() {
+      _houseAddressController.text = profile?['address'] ?? '';
+    });
+  }
+
+  Future<void> _autofillPhoneFromProfile() async {
+    final username = await _getUsernameFromFirestore();
+    if (username == null) return;
+    final userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(username).get();
+    final profile = userDoc.data();
+    setState(() {
+      _housePhoneController.text = profile?['phone'] ?? '';
+    });
+  }
+
+  void _addPriceField() {
+    setState(() {
+      _prices.add({'amount': '', 'unit': _priceUnit});
+    });
+  }
+
+  Future<void> _submitHouse() async {
+    if (!_houseFormKey.currentState!.validate() || _availableFrom == null || _availableTo == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill all required fields and select dates.')),
+      );
+      return;
+    }
+    final username = await _getUsernameFromFirestore();
+    if (username == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not found. Please log in again.')),
+      );
+      return;
+    }
+    setState(() { _isLoading = true; });
+    try {
+      await _db.createHouse(
+        username: username,
+        address: _houseAddressController.text.trim(),
+        phone: _housePhoneController.text.trim(),
+        prices: _prices,
+        availableFrom: _availableFrom!,
+        availableTo: _availableTo!,
+      );
+      setState(() { _showHouseForm = false; });
+      await _fetchHouse();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('House registered/updated successfully!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() { _isLoading = false; });
+    }
+  }
+
+  @override
+  void dispose() {
+    _houseAddressController.dispose();
+    _housePhoneController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -57,113 +244,69 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 3,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-                children: [
-                  _buildServiceButton(
-                    icon: Icons.book,
-                    label: 'Campus Resource Booking',
-                    onTap: () {},
-                  ),
-                  _buildServiceButton(
-                    icon: Icons.headset_mic,
-                    label: 'Student Services Center',
-                    onTap: () {},
-                  ),
-                  _buildServiceButton(
-                    icon: Icons.calendar_today,
-                    label: 'Class Schedules',
-                    onTap: () {},
-                  ),
-                  _buildServiceButton(
-                    icon: Icons.list_alt,
-                    label: 'Examination Result',
-                    onTap: () {},
-                  ),
-                  _buildServiceButton(
-                    icon: Icons.assignment,
-                    label: 'Course Registration',
-                    onTap: () {},
-                  ),
-                  _buildServiceButton(
-                    icon: Icons.apps,
-                    label: 'More',
-                    onTap: () {},
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Latest News',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 150,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                    if (_house == null && !_showHouseForm)
+                      Center(
+                        child: ElevatedButton(
+                          onPressed: () => _showRegisterHouseForm(),
+                          child: const Text('Register New House'),
+                        ),
+                      ),
+                    if (_showHouseForm) _buildHouseForm(),
+                    if (_house != null && !_showHouseForm) ...[
+                      const Text('Your House:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                      Card(
+                        child: ListTile(
+                          title: Text(_house!.address),
+                          subtitle: Text('Phone: ${_house!.phone}\nPrices: ${_house!.prices.map((p) => '${p['amount']} ${p['unit']}').join(', ')}\nAvailable: ${_house!.availableFrom.toLocal().toString().split(' ')[0]} to ${_house!.availableTo.toLocal().toString().split(' ')[0]}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _showRegisterHouseForm(house: _house),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Latest News',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                    ),
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 150,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          _buildNewsCard(
+                            imageUrl:
+                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          ),
+                          _buildNewsCard(
+                            imageUrl:
+                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          ),
+                          _buildNewsCard(
+                            imageUrl:
+                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-              const Text(
-                'Latest News',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 150,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                    ),
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                    ),
-                    _buildNewsCard(
-                      imageUrl:
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+            ),
       bottomNavigationBar: StoraNovaNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
@@ -174,40 +317,8 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
               context,
               MaterialPageRoute(builder: (context) => const ProfileScreen()),
             );
-          } else if (index == 2) {
-            // Already on dashboard, do nothing
           }
-          // Add navigation for other tabs as needed
         },
-      ),
-    );
-  }
-
-  Widget _buildServiceButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 30, color: Colors.blue),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -220,6 +331,153 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           image: DecorationImage(
             image: NetworkImage(imageUrl),
             fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHouseForm() {
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _houseFormKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Register/Edit House', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _houseAddressController,
+                      decoration: const InputDecoration(labelText: 'House Address'),
+                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () async { await _autofillAddressFromProfile(); },
+                    child: const Text('Same as Profile'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _housePhoneController,
+                      decoration: const InputDecoration(labelText: 'Phone Number'),
+                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () async { await _autofillPhoneFromProfile(); },
+                    child: const Text('Same as Profile'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ..._prices.asMap().entries.map((entry) {
+                int idx = entry.key;
+                return Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: entry.value['amount'],
+                        decoration: const InputDecoration(labelText: 'Price'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (val) => _prices[idx]['amount'] = val,
+                        validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    DropdownButton<String>(
+                      value: entry.value['unit'],
+                      items: const [
+                        DropdownMenuItem(value: 'per day', child: Text('per day')),
+                        DropdownMenuItem(value: 'per week', child: Text('per week')),
+                      ],
+                      onChanged: (val) {
+                        setState(() { _prices[idx]['unit'] = val ?? 'per day'; });
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () {
+                        setState(() { _prices.removeAt(idx); });
+                      },
+                    ),
+                  ],
+                );
+              }),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                onPressed: _addPriceField,
+                child: const Text('Add Price Option'),
+              ),
+              const SizedBox(height: 12),
+              const Text('Duration Available For Booking:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(_availableFrom == null ? 'From: Not set' : 'From: ${_availableFrom!.toLocal().toString().split(' ')[0]}'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) setState(() { _availableFrom = picked; });
+                    },
+                    child: const Text('Pick Start'),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(_availableTo == null ? 'To: Not set' : 'To: ${_availableTo!.toLocal().toString().split(' ')[0]}'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _availableFrom ?? DateTime.now(),
+                        firstDate: _availableFrom ?? DateTime.now(),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) setState(() { _availableTo = picked; });
+                    },
+                    child: const Text('Pick End'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  ElevatedButton(
+                    onPressed: _submitHouse,
+                    child: const Text('Submit'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    onPressed: () { setState(() { _showHouseForm = false; }); },
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
