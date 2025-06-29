@@ -30,12 +30,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? role;
   String? phone;
   String? email;
+  String? username;
   bool isLoading = true;
   int _currentIndex = 4; // Profile tab
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
+
+  Uint8List? _selectedImageBytes;
+  File? _selectedImageFile;
+  String? _selectedImagePreviewName;
+  bool _isCameraLoading = false;
 
   @override
   void initState() {
@@ -51,8 +57,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     // Try to get the correct username (document ID)
-    String? username = user.displayName;
-    if (username == null || username.isEmpty) {
+    String? resolvedUsername = user.displayName;
+    if (resolvedUsername == null || resolvedUsername.isEmpty) {
       // Fallback: try to get username from Firestore by email
       final userDoc = await FirebaseFirestore.instance
           .collection('AppUsers')
@@ -60,15 +66,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .limit(1)
           .get();
       if (userDoc.docs.isNotEmpty) {
-        username = userDoc.docs.first.id;
+        resolvedUsername = userDoc.docs.first.id;
       } else {
         setState(() { isLoading = false; });
         return;
       }
     }
-    final doc = await FirebaseFirestore.instance.collection('AppUsers').doc(username).get();
+    final doc = await FirebaseFirestore.instance.collection('AppUsers').doc(resolvedUsername).get();
     final data = doc.data();
     setState(() {
+      username = resolvedUsername;
       imageUrl = (data?['profileImageUrl'] ?? '') as String;
       name = (data?['name'] ?? '') as String;
       role = (data?['role'] ?? '') as String;
@@ -150,7 +157,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
+    String? uploadedUrl = imageUrl;
     try {
+      // If a new image is selected, upload it first
+      if (_selectedImageBytes != null || _selectedImageFile != null) {
+        String? url;
+        if (kIsWeb && _selectedImageBytes != null && _selectedImagePreviewName != null) {
+          url = await _uploadImageToCloudinaryWeb(_selectedImageBytes!, _selectedImagePreviewName!);
+        } else if (_selectedImageFile != null) {
+          url = await _uploadImageToCloudinary(_selectedImageFile!);
+        }
+        if (url != null) {
+          uploadedUrl = url;
+        } else {
+          setState(() { isLoading = false; });
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Image upload failed. Please try again.')));
+          return;
+        }
+      }
       if (emailChanged) {
         // Re-authenticate required
         String? password = await _showPasswordDialog();
@@ -167,12 +191,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'name': newName,
         'phone': newPhone,
         'email': newEmail,
-        'profileImageUrl': imageUrl ?? '',
+        'profileImageUrl': uploadedUrl ?? '',
       });
       // Reload profile from Firestore to ensure UI is in sync and all fields (including image) are displayed
       await _loadProfile();
       setState(() {
         isEditing = false;
+        _selectedImageBytes = null;
+        _selectedImageFile = null;
+        _selectedImagePreviewName = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated!')));
     } catch (e) {
@@ -224,12 +251,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _pickAndUploadImage() async {
+    setState(() { _isCameraLoading = true; });
+    await Future.delayed(const Duration(seconds: 1));
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile == null) return;
-
+    if (pickedFile == null) {
+      setState(() { _isCameraLoading = false; });
+      return;
+    }
     if (kIsWeb) {
-      // Web: use bytes
       try {
         final imageBytes = await pickedFile.readAsBytes();
         final fileSize = imageBytes.length;
@@ -237,9 +267,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Image must be below 20MB.')),
           );
+          setState(() { _isCameraLoading = false; });
           return;
         }
-        // Show preview and confirmation dialog
         bool? confirm = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -261,61 +291,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         );
-        if (confirm != true) return;
-        setState(() { isLoading = true; });
-        String? uploadedUrl = await _uploadImageToCloudinaryWeb(imageBytes, pickedFile.name);
-        if (uploadedUrl != null) {
-          try {
-            final user = FirebaseAuth.instance.currentUser;
-            if (user != null) {
-              // Get the correct username (document ID) as in _loadProfile
-              String? username = user.displayName;
-              if (username == null || username.isEmpty) {
-                // Fallback: try to get username from Firestore by email
-                final userDoc = await FirebaseFirestore.instance
-                    .collection('AppUsers')
-                    .where('email', isEqualTo: user.email)
-                    .limit(1)
-                    .get();
-                if (userDoc.docs.isNotEmpty) {
-                  username = userDoc.docs.first.id;
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not determine your username for image upload.')),
-                  );
-                  setState(() { isLoading = false; });
-                  return;
-                }
-              }
-              await FirebaseFirestore.instance.collection('AppUsers').doc(username).set({
-                'profileImageUrl': uploadedUrl,
-              }, SetOptions(merge: true));
-            }
-            setState(() {
-              imageUrl = uploadedUrl;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Profile image updated!')),
-            );
-          } catch (e) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Error saving image to Firestore: $e')),
-            );
-          }
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Image upload failed.')),
-          );
+        if (confirm != true) {
+          setState(() { _isCameraLoading = false; });
+          return;
         }
-        setState(() { isLoading = false; });
+        setState(() {
+          _selectedImageBytes = imageBytes;
+          _selectedImageFile = null;
+          _selectedImagePreviewName = pickedFile.name;
+          _isCameraLoading = false;
+        });
       } catch (e) {
-        setState(() { isLoading = false; });
+        setState(() { _isCameraLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading image: $e')),
+          SnackBar(content: Text('Error preparing image: $e')),
         );
       }
     } else {
-      // Mobile/desktop: use File
       try {
         final file = File(pickedFile.path);
         final fileSize = await file.length();
@@ -323,9 +315,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Image must be below 20MB.')),
           );
+          setState(() { _isCameraLoading = false; });
           return;
         }
-        // Show preview and confirmation dialog
         bool? confirm = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -347,57 +339,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
           ),
         );
-        if (confirm != true) return;
-        setState(() { isLoading = true; });
-        String? uploadedUrl = await _uploadImageToCloudinary(file);
-        if (uploadedUrl != null) {
-          try {
-            final user = FirebaseAuth.instance.currentUser;
-            if (user != null) {
-              // Get the correct username (document ID) as in _loadProfile
-              String? username = user.displayName;
-              if (username == null || username.isEmpty) {
-                // Fallback: try to get username from Firestore by email
-                final userDoc = await FirebaseFirestore.instance
-                    .collection('AppUsers')
-                    .where('email', isEqualTo: user.email)
-                    .limit(1)
-                    .get();
-                if (userDoc.docs.isNotEmpty) {
-                  username = userDoc.docs.first.id;
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not determine your username for image upload.')),
-                  );
-                  setState(() { isLoading = false; });
-                  return;
-                }
-              }
-              await FirebaseFirestore.instance.collection('AppUsers').doc(username).set({
-                'profileImageUrl': uploadedUrl,
-              }, SetOptions(merge: true));
-            }
-            setState(() {
-              imageUrl = uploadedUrl;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Profile image updated!')),
-            );
-          } catch (e) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Error saving image to Firestore: $e')),
-            );
-          }
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Image upload failed.')),
-          );
+        if (confirm != true) {
+          setState(() { _isCameraLoading = false; });
+          return;
         }
-        setState(() { isLoading = false; });
+        setState(() {
+          _selectedImageFile = file;
+          _selectedImageBytes = null;
+          _selectedImagePreviewName = null;
+          _isCameraLoading = false;
+        });
       } catch (e) {
-        setState(() { isLoading = false; });
+        setState(() { _isCameraLoading = false; });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error uploading image: $e')),
+          SnackBar(content: Text('Error preparing image: $e')),
         );
       }
     }
@@ -429,7 +384,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFFADD8E6),
         elevation: 0,
-        title: Text(name != null && name!.isNotEmpty ? name! : 'Profile'),
+        title: Text(username != null && username!.isNotEmpty ? username! : 'Profile'),
         centerTitle: true,
         actions: [
           IconButton(
@@ -461,34 +416,51 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ),
                             child: ClipOval(
-                              child: imageUrl == null || imageUrl!.isEmpty
-                                  ? Image.network(
-                                      'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                                      fit: BoxFit.cover,
-                                    )
-                                  : Image.network(imageUrl!, fit: BoxFit.cover),
+                              child: _selectedImageBytes != null
+                                  ? Image.memory(_selectedImageBytes!, fit: BoxFit.cover)
+                                  : (_selectedImageFile != null
+                                      ? Image.file(_selectedImageFile!, fit: BoxFit.cover)
+                                      : (imageUrl == null || imageUrl!.isEmpty
+                                          ? Image.network(
+                                              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                                              fit: BoxFit.cover,
+                                            )
+                                          : Image.network(imageUrl!, fit: BoxFit.cover))),
                             ),
                           ),
-                          Positioned(
-                            bottom: 8,
-                            right: 8,
-                            child: isEditing // Only show camera icon in edit mode
-                                ? GestureDetector(
-                                    onTap: _pickAndUploadImage,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      padding: const EdgeInsets.all(8),
-                                      child: const Icon(Icons.camera_alt, color: Colors.white),
-                                    ),
-                                  )
-                                : const SizedBox.shrink(),
-                          ),
+                          if (isEditing)
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: InkWell(
+                                onTap: _isCameraLoading ? null : _pickAndUploadImage,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  padding: const EdgeInsets.all(8),
+                                  child: _isCameraLoading
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          ),
+                                        )
+                                      : const Icon(Icons.camera_alt, color: Colors.white),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
+                    if ((isEditing && (_selectedImageBytes != null || _selectedImageFile != null)))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text('Preview. Click Save to upload.', style: TextStyle(color: Colors.blue)),
+                      ),
                     const SizedBox(height: 20),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -498,38 +470,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           TextFormField(
                             controller: _nameController,
                             enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
                             decoration: const InputDecoration(
                               labelText: 'Name',
                               border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
                             ),
                             validator: (v) => v == null || v.isEmpty ? 'Name required' : null,
                           ),
                           const SizedBox(height: 16),
-                          TextFormField(
-                            controller: TextEditingController(text: role ?? ''),
-                            enabled: false,
-                            style: const TextStyle(color: Colors.black),
-                            decoration: const InputDecoration(
-                              labelText: 'Role',
-                              border: OutlineInputBorder(),
+                          GestureDetector(
+                            onTap: isEditing
+                                ? () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Contact admin to change your role.')),
+                                    );
+                                  }
+                                : null,
+                            child: AbsorbPointer(
+                              child: TextFormField(
+                                controller: TextEditingController(text: role ?? ''),
+                                enabled: false,
+                                style: const TextStyle(color: Colors.black),
+                                decoration: InputDecoration(
+                                  labelText: 'Role',
+                                  border: const OutlineInputBorder(),
+                                  filled: true,
+                                  fillColor: isEditing ? Colors.grey[200] : Colors.white,
+                                ),
+                              ),
                             ),
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
                             controller: _phoneController,
                             enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
                             decoration: const InputDecoration(
                               labelText: 'Phone Number',
                               border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
                             ),
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
                             controller: _emailController,
                             enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
                             decoration: const InputDecoration(
                               labelText: 'Email',
                               border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
                             ),
                             validator: (v) => v == null || v.isEmpty ? 'Email required' : null,
                           ),

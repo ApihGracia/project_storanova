@@ -3,6 +3,10 @@ import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'owner_dashboard.dart';
+import 'dart:html' as html; // For Flutter web image picking
+import 'dart:typed_data';
+import 'dart:convert';
+import 'dart:async';
 
 void main() {
   runApp(const MyApp());
@@ -50,14 +54,29 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  bool isEditing = false;
+  String? _originalName;
+  String? _originalPhone;
+  String? _originalEmail;
+  String? _originalAddress;
+  String? imageUrl;
   String? name;
   String? role;
   String? phone;
   String? email;
   String? address;
-  String? emergencyContact;
+  String? username;
   bool isLoading = true;
   int _currentIndex = 4;
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
+
+  Uint8List? _selectedImageBytes;
+  String? _selectedImageUrlPreview;
+  bool _isUploadingImage = false;
 
   @override
   void initState() {
@@ -71,15 +90,217 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() { isLoading = false; });
       return;
     }
-    final doc = await FirebaseFirestore.instance.collection('AppUsers').doc(user.displayName ?? user.email?.split('@')[0]).get();
+    String? resolvedUsername = user.displayName;
+    if (resolvedUsername == null || resolvedUsername.isEmpty) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('AppUsers')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
+      if (userDoc.docs.isNotEmpty) {
+        resolvedUsername = userDoc.docs.first.id;
+      } else {
+        setState(() { isLoading = false; });
+        return;
+      }
+    }
+    final doc = await FirebaseFirestore.instance.collection('AppUsers').doc(resolvedUsername).get();
     final data = doc.data();
     setState(() {
-      name = data?['name'] ?? '';
-      role = data?['role'] ?? '';
-      phone = data?['phone'] ?? '';
-      email = data?['email'] ?? user.email ?? '';
-      address = data?['address'] ?? '';
-      emergencyContact = data?['emergencyContact'] ?? '';
+      username = resolvedUsername;
+      imageUrl = (data?['profileImageUrl'] ?? '') as String;
+      name = (data?['name'] ?? '') as String;
+      role = (data?['role'] ?? '') as String;
+      phone = (data?['phone'] ?? '') as String;
+      email = (data?['email'] ?? user.email ?? '') as String;
+      address = (data?['address'] ?? '') as String;
+      _nameController.text = name ?? '';
+      _phoneController.text = phone ?? '';
+      _emailController.text = email ?? '';
+      _addressController.text = address ?? '';
+      isLoading = false;
+      _originalName = name ?? '';
+      _originalPhone = phone ?? '';
+      _originalEmail = email ?? '';
+      _originalAddress = address ?? '';
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _startEdit() {
+    setState(() {
+      isEditing = true;
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      isEditing = false;
+      _nameController.text = _originalName ?? '';
+      _phoneController.text = _originalPhone ?? '';
+      _emailController.text = _originalEmail ?? '';
+      _addressController.text = _originalAddress ?? '';
+      _selectedImageBytes = null;
+      _selectedImageUrlPreview = null;
+    });
+  }
+  // Image picking and confirmation logic for Flutter web (like customer profile)
+  Future<void> _pickImage() async {
+    setState(() { _isUploadingImage = true; });
+    final html.FileUploadInputElement uploadInput = html.FileUploadInputElement();
+    uploadInput.accept = 'image/*';
+    uploadInput.click();
+    uploadInput.onChange.listen((event) async {
+      final file = uploadInput.files?.first;
+      if (file != null) {
+        final reader = html.FileReader();
+        reader.readAsArrayBuffer(file);
+        reader.onLoadEnd.listen((event) async {
+          final bytes = reader.result as Uint8List;
+          // Show confirmation dialog with preview
+          final urlCreator = html.Url.createObjectUrl(file);
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Confirm Image'),
+              content: Image.network(urlCreator, width: 200, height: 200),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Use Image')),
+              ],
+            ),
+          );
+          html.Url.revokeObjectUrl(urlCreator);
+          if (confirmed == true) {
+            setState(() {
+              _selectedImageBytes = bytes;
+              _isUploadingImage = false;
+            });
+          } else {
+            setState(() {
+              _selectedImageBytes = null;
+              _isUploadingImage = false;
+            });
+          }
+        });
+      } else {
+        // User cancelled file dialog, reset loading state
+        setState(() { _isUploadingImage = false; });
+      }
+    });
+    // Also handle the case where the user closes the dialog without triggering onChange
+    // (workaround: set a short timeout to reset loading if no file is picked)
+    Future.delayed(const Duration(seconds: 2), () {
+      if (uploadInput.files == null || uploadInput.files!.isEmpty) {
+        if (mounted) setState(() { _isUploadingImage = false; });
+      }
+    });
+  }
+
+  Future<String?> _uploadImageToCloudinary(Uint8List imageBytes) async {
+    // Use your actual Cloudinary upload preset and cloud name
+    const String uploadPreset = 'StoraNova';
+    const String cloudName = 'dxeejx1hq';
+    final url = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
+    final request = html.HttpRequest();
+    final formData = html.FormData();
+    formData.appendBlob('file', html.Blob([imageBytes]), 'profile_image.png');
+    formData.append('upload_preset', uploadPreset);
+    try {
+      request.open('POST', url.toString());
+      final completer = Completer<String?>();
+      request.onLoadEnd.listen((event) {
+        if (request.status == 200) {
+          final response = json.decode(request.responseText!);
+          completer.complete(response['secure_url'] as String?);
+        } else {
+          // Print Cloudinary error for debugging
+          print('Cloudinary error: \\nStatus: \\${request.status}\\nResponse: \\${request.responseText}');
+          completer.complete(null);
+        }
+      });
+      request.send(formData);
+      return await completer.future;
+    } catch (e) {
+      print('Cloudinary upload exception: $e');
+      return null;
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() { isLoading = true; });
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() { isLoading = false; });
+      return;
+    }
+    final newName = _nameController.text.trim();
+    final newPhone = _phoneController.text.trim();
+    final newEmail = _emailController.text.trim();
+    final newAddress = _addressController.text.trim();
+    String? resolvedUsername = user.displayName;
+    if (resolvedUsername == null || resolvedUsername.isEmpty) {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('AppUsers')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
+      if (userDoc.docs.isNotEmpty) {
+        resolvedUsername = userDoc.docs.first.id;
+      } else {
+        setState(() { isLoading = false; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not determine your username.')),
+        );
+        return;
+      }
+    }
+    try {
+      String? uploadedImageUrl = imageUrl;
+      if (_selectedImageBytes != null) {
+        setState(() { _isUploadingImage = true; });
+        final url = await _uploadImageToCloudinary(_selectedImageBytes!);
+        if (url != null) {
+          uploadedImageUrl = url;
+        } else {
+          setState(() { isLoading = false; _isUploadingImage = false; });
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Image upload failed. Please try again.')));
+          return;
+        }
+        setState(() { _isUploadingImage = false; });
+      }
+      await FirebaseFirestore.instance.collection('AppUsers').doc(resolvedUsername).update({
+        'name': newName,
+        'phone': newPhone,
+        'email': newEmail,
+        'address': newAddress,
+        'profileImageUrl': uploadedImageUrl ?? '',
+      });
+      // Wait a moment to ensure Firestore is updated before reloading
+      await Future.delayed(const Duration(milliseconds: 500));
+      setState(() {
+        imageUrl = uploadedImageUrl;
+        isEditing = false;
+        _selectedImageBytes = null;
+        _selectedImageUrlPreview = null;
+      });
+      await _loadProfile();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated!')));
+    } catch (e) {
+      setState(() { isLoading = false; _isUploadingImage = false; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
+      return;
+    }
+    setState(() {
       isLoading = false;
     });
   }
@@ -90,11 +311,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFFADD8E6),
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(name != null && name!.isNotEmpty ? name! : 'Profile'),
+        title: Text(username != null && username!.isNotEmpty ? username! : 'Profile'),
+        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.more_vert),
@@ -105,44 +323,182 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              child: Column(
-                children: [
-                  const SizedBox(height: 20),
-                  Center(
-                    child: Container(
-                      width: 150,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.blue,
-                          width: 5,
-                        ),
-                      ),
-                      child: ClipOval(
-                        child: Image.network(
-                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                          fit: BoxFit.cover,
-                        ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 20),
+                    Center(
+                      child: Stack(
+                        alignment: Alignment.bottomRight,
+                        children: [
+                          Container(
+                            width: 150,
+                            height: 150,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.blue,
+                                width: 5,
+                              ),
+                            ),
+                            child: ClipOval(
+                              child: _selectedImageBytes != null
+                                  ? Image.memory(_selectedImageBytes!, fit: BoxFit.cover)
+                                  : (imageUrl == null || imageUrl!.isEmpty)
+                                      ? Image.network(
+                                          'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
+                                          fit: BoxFit.cover,
+                                        )
+                                      : Image.network(imageUrl!, fit: BoxFit.cover),
+                            ),
+                          ),
+                          if (isEditing)
+                            Positioned(
+                              bottom: 8,
+                              right: 8,
+                              child: InkWell(
+                                onTap: _isUploadingImage ? null : _pickImage,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.2),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
+                                  ),
+                                  padding: const EdgeInsets.all(8),
+                                  child: _isUploadingImage
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.camera_alt, color: Colors.blue),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _profileField('Name', name ?? ''),
-                        _profileField('Role', role ?? ''),
-                        _profileField('Phone Number', phone ?? ''),
-                        _profileField('Email', email ?? ''),
-                        _profileField('Address', address ?? ''),
-                        _profileField('Emergency Contact', emergencyContact ?? ''),
-                      ],
+                    if (_selectedImageBytes != null && isEditing)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text('Preview. Click Save to upload.', style: TextStyle(color: Colors.blue)),
+                      ),
+                    const SizedBox(height: 20),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextFormField(
+                            controller: _nameController,
+                            enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
+                            decoration: const InputDecoration(
+                              labelText: 'Name',
+                              border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Name required' : null,
+                          ),
+                          const SizedBox(height: 16),
+                          GestureDetector(
+                            onTap: isEditing
+                                ? () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Contact admin to change your role.')),
+                                    );
+                                  }
+                                : null,
+                            child: AbsorbPointer(
+                              child: TextFormField(
+                                controller: TextEditingController(text: role ?? ''),
+                                enabled: false,
+                                style: const TextStyle(color: Colors.black),
+                                decoration: InputDecoration(
+                                  labelText: 'Role',
+                                  border: const OutlineInputBorder(),
+                                  filled: true,
+                                  fillColor: isEditing ? Colors.grey[200] : Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _phoneController,
+                            enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
+                            decoration: const InputDecoration(
+                              labelText: 'Phone Number',
+                              border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _emailController,
+                            enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                            validator: (v) => v == null || v.isEmpty ? 'Email required' : null,
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _addressController,
+                            enabled: isEditing,
+                            style: const TextStyle(color: Colors.black),
+                            decoration: const InputDecoration(
+                              labelText: 'Address',
+                              border: OutlineInputBorder(),
+                              filled: true,
+                              fillColor: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            children: [
+                              if (!isEditing)
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: isLoading ? null : _startEdit,
+                                    child: const Text('Edit'),
+                                  ),
+                                ),
+                              if (isEditing) ...[
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: isLoading || _isUploadingImage ? null : _saveProfile,
+                                    child: const Text('Save'),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: isLoading || _isUploadingImage ? null : _cancelEdit,
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
       bottomNavigationBar: StoraNovaNavBar(
@@ -151,15 +507,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
           if (index == 2) {
-            // Home (dashboard)
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => OwnerHomePage()),
             );
           } else if (index == 4) {
-            // Already on profile
           }
-          // Add navigation for other tabs as needed
         },
       ),
     );
@@ -190,9 +543,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-
-// StoraNovaNavBar is now imported from main.dart
-
 
 class ProfileRow extends StatelessWidget {
   const ProfileRow({super.key, required this.label, required this.value});
