@@ -71,6 +71,7 @@ class DatabaseService {
     required List<Map<String, dynamic>> prices,
     required DateTime availableFrom,
     required DateTime availableTo,
+    List<String> imageUrls = const [],
   }) async {
     final houseData = {
       'owner': username,
@@ -79,6 +80,7 @@ class DatabaseService {
       'prices': prices,
       'availableFrom': availableFrom.toIso8601String(),
       'availableTo': availableTo.toIso8601String(),
+      'imageUrls': imageUrls,
     };
     await FirebaseFirestore.instance.collection('Houses').doc(username).set(houseData);
   }

@@ -4,6 +4,11 @@ import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'database.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:typed_data';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 void main() {
   runApp(OwnerDashboard());
@@ -26,6 +31,7 @@ class House {
   final List<Map<String, dynamic>> prices;
   final DateTime availableFrom;
   final DateTime availableTo;
+  final List<String> imageUrls;
 
   House({
     required this.id,
@@ -34,6 +40,7 @@ class House {
     required this.prices,
     required this.availableFrom,
     required this.availableTo,
+    this.imageUrls = const [],
   });
 
   factory House.fromMap(String id, Map<String, dynamic> data) {
@@ -44,6 +51,7 @@ class House {
       prices: List<Map<String, dynamic>>.from(data['prices'] ?? []),
       availableFrom: DateTime.parse(data['availableFrom'] ?? DateTime.now().toIso8601String()),
       availableTo: DateTime.parse(data['availableTo'] ?? DateTime.now().toIso8601String()),
+      imageUrls: data['imageUrls'] != null ? List<String>.from(data['imageUrls']) : [],
     );
   }
 
@@ -53,6 +61,7 @@ class House {
     'prices': prices,
     'availableFrom': availableFrom.toIso8601String(),
     'availableTo': availableTo.toIso8601String(),
+    'imageUrls': imageUrls,
   };
 }
 
@@ -76,6 +85,10 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   DateTime? _availableFrom;
   DateTime? _availableTo;
   final DatabaseService _db = DatabaseService();
+  // Unified image list: String (url) for existing, Uint8List for new
+  List<dynamic> _formImages = [];
+  bool _isUploadingImages = false;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -134,6 +147,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         _priceUnit = house.prices.isNotEmpty ? house.prices[0]['unit'] : 'per day';
         _availableFrom = house.availableFrom;
         _availableTo = house.availableTo;
+        _formImages = List<dynamic>.from(house.imageUrls); // Always dynamic
       } else {
         _houseAddressController.text = '';
         _housePhoneController.text = '';
@@ -141,6 +155,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         _priceUnit = 'per day';
         _availableFrom = null;
         _availableTo = null;
+        _formImages = [];
       }
     });
   }
@@ -171,6 +186,68 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     });
   }
 
+  Future<void> _pickHouseImage() async {
+    if (_formImages.length >= 3) return;
+    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile == null) return;
+    final file = File(pickedFile.path);
+    final fileSize = await file.length();
+    if (fileSize > 20 * 1024 * 1024) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Each image must be below 20MB.')),
+      );
+      return;
+    }
+    final bytes = await file.readAsBytes();
+    setState(() {
+      _formImages.add(bytes);
+    });
+  }
+
+  Future<String?> _uploadImageToCloudinary(Uint8List imageBytes) async {
+    const String uploadPreset = 'StoraNova';
+    const String cloudName = 'dxeejx1hq';
+    final url = Uri.parse('https://api.cloudinary.com/v1_1/$cloudName/image/upload');
+    final request = http.MultipartRequest('POST', url)
+      ..fields['upload_preset'] = uploadPreset
+      ..files.add(http.MultipartFile.fromBytes('file', imageBytes, filename: 'house_image.png'));
+    try {
+      final response = await request.send();
+      final respStr = await response.stream.bytesToString();
+      if (response.statusCode == 200) {
+        final data = jsonDecode(respStr);
+        return data['secure_url'];
+      } else {
+        print('Cloudinary upload failed: \\${response.statusCode}');
+        print('Cloudinary error response: \\${respStr}');
+        return null;
+      }
+    } catch (e) {
+      print('Cloudinary upload exception: $e');
+      return null;
+    }
+  }
+
+  Future<List<String>> _uploadImagesToCloudinary(List<dynamic> images) async {
+    List<String> urls = [];
+    for (var img in images) {
+      if (img is String) {
+        urls.add(img); // Already uploaded
+      } else if (img is Uint8List) {
+        final url = await _uploadImageToCloudinary(img);
+        if (url != null) {
+          urls.add(url);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to upload one of the images. Please try again.')),
+          );
+          return [];
+        }
+      }
+    }
+    return urls;
+  }
+
   Future<void> _submitHouse() async {
     if (!_houseFormKey.currentState!.validate() || _availableFrom == null || _availableTo == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -185,8 +262,13 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
       );
       return;
     }
-    setState(() { _isLoading = true; });
+    setState(() { _isLoading = true; _isUploadingImages = true; });
     try {
+      final uploadedUrls = await _uploadImagesToCloudinary(_formImages);
+      if (uploadedUrls.length != _formImages.length) {
+        setState(() { _isLoading = false; _isUploadingImages = false; });
+        return;
+      }
       await _db.createHouse(
         username: username,
         address: _houseAddressController.text.trim(),
@@ -194,18 +276,19 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         prices: _prices,
         availableFrom: _availableFrom!,
         availableTo: _availableTo!,
+        imageUrls: uploadedUrls,
       );
-      setState(() { _showHouseForm = false; });
+      setState(() { _showHouseForm = false; _formImages = []; });
       await _fetchHouse();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('House registered/updated successfully!')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
+        SnackBar(content: Text('Error: [${e.toString()}')),
       );
     } finally {
-      setState(() { _isLoading = false; });
+      setState(() { _isLoading = false; _isUploadingImages = false; });
     }
   }
 
@@ -263,13 +346,26 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                     if (_house != null && !_showHouseForm) ...[
                       const Text('Your House:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                       Card(
-                        child: ListTile(
-                          title: Text(_house!.address),
-                          subtitle: Text('Phone: ${_house!.phone}\nPrices: ${_house!.prices.map((p) => '${p['amount']} ${p['unit']}').join(', ')}\nAvailable: ${_house!.availableFrom.toLocal().toString().split(' ')[0]} to ${_house!.availableTo.toLocal().toString().split(' ')[0]}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.edit),
-                            onPressed: () => _showRegisterHouseForm(house: _house),
-                          ),
+                        child: Column(
+                          children: [
+                            if (_house!.imageUrls.isNotEmpty)
+                              Column(
+                                children: [
+                                  SizedBox(
+                                    height: 200,
+                                    child: _HouseImageSlider(imageUrls: _house!.imageUrls),
+                                  ),
+                                ],
+                              ),
+                            ListTile(
+                              title: Text(_house!.address),
+                              subtitle: Text('Phone: ${_house!.phone}\nPrices: ${_house!.prices.map((p) => '${p['amount']} ${p['unit']}').join(', ')}\nAvailable: ${_house!.availableFrom.toLocal().toString().split(' ')[0]} to ${_house!.availableTo.toLocal().toString().split(' ')[0]}'),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.edit),
+                                onPressed: () => _showRegisterHouseForm(house: _house),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -348,6 +444,78 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Register/Edit House', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 12),
+              // Unified image preview and delete for both uploaded and new images
+              Row(
+                children: [
+                  ..._formImages.asMap().entries.map((entry) {
+                    int i = entry.key;
+                    var img = entry.value;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                      child: Stack(
+                        alignment: Alignment.topRight,
+                        children: [
+                          GestureDetector(
+                            onTap: null,
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.blue),
+                                borderRadius: BorderRadius.circular(8),
+                                color: Colors.grey[200],
+                              ),
+                              child: img is String
+                                ? Image.network(img, fit: BoxFit.cover)
+                                : Image.memory(img, fit: BoxFit.cover),
+                            ),
+                          ),
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: IconButton(
+                              icon: const Icon(Icons.close, color: Colors.red, size: 20),
+                              onPressed: _isUploadingImages ? null : () {
+                                setState(() {
+                                  _formImages.removeAt(i);
+                                });
+                              },
+                            ),
+                          ),
+                          if (_isUploadingImages && img is Uint8List)
+                            const Positioned.fill(
+                              child: Center(
+                                child: SizedBox(
+                                  width: 40,
+                                  height: 40,
+                                  child: CircularProgressIndicator(strokeWidth: 3),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
+                  if (_formImages.length < 3)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                      child: GestureDetector(
+                        onTap: _isUploadingImages ? null : _pickHouseImage,
+                        child: Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.blue),
+                            borderRadius: BorderRadius.circular(8),
+                            color: Colors.grey[200],
+                          ),
+                          child: const Icon(Icons.add_a_photo, size: 32, color: Colors.blue),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -481,6 +649,95 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+// --- Image slider with dot indicator ---
+class _HouseImageSlider extends StatefulWidget {
+  final List<String> imageUrls;
+  const _HouseImageSlider({Key? key, required this.imageUrls}) : super(key: key);
+
+  @override
+  State<_HouseImageSlider> createState() => _HouseImageSliderState();
+}
+
+class _HouseImageSliderState extends State<_HouseImageSlider> {
+  int _currentPage = 0;
+  late final PageController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _showFullScreenImage(String url) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Container(
+          color: Colors.black.withOpacity(0.95),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                top: 40,
+                right: 20,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.black, size: 32),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        PageView(
+          controller: _controller,
+          onPageChanged: (i) => setState(() => _currentPage = i),
+          children: widget.imageUrls.map((url) => GestureDetector(
+            onTap: () => _showFullScreenImage(url),
+            child: Image.network(url, fit: BoxFit.cover),
+          )).toList(),
+        ),
+        if (widget.imageUrls.length > 1)
+          Positioned(
+            bottom: 8,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.imageUrls.length, (i) => Container(
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _currentPage == i ? Colors.blue : Colors.grey,
+                ),
+              )),
+            ),
+          ),
+      ],
     );
   }
 }
