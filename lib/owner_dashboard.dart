@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 void main() {
   runApp(OwnerDashboard());
@@ -73,7 +74,7 @@ class OwnerHomePage extends StatefulWidget {
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 2;
+  int _currentIndex = 0; // 0: Home, 1: Wishlist, 2: Notification, 3: Profile
   House? _house;
   bool _isLoading = true;
   bool _showHouseForm = false;
@@ -190,15 +191,20 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     if (_formImages.length >= 3) return;
     final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
     if (pickedFile == null) return;
-    final file = File(pickedFile.path);
-    final fileSize = await file.length();
-    if (fileSize > 20 * 1024 * 1024) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Each image must be below 20MB.')),
-      );
-      return;
+    Uint8List bytes;
+    if (kIsWeb) {
+      bytes = await pickedFile.readAsBytes();
+    } else {
+      final file = File(pickedFile.path);
+      final fileSize = await file.length();
+      if (fileSize > 20 * 1024 * 1024) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Each image must be below 20MB.')),
+        );
+        return;
+      }
+      bytes = await file.readAsBytes();
     }
-    final bytes = await file.readAsBytes();
     setState(() {
       _formImages.add(bytes);
     });
@@ -303,6 +309,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: const Color(0xFFB4D4FF),
         elevation: 0,
         title: Row(
@@ -321,14 +328,51 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.black),
-            onPressed: () {},
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.more_vert, color: Colors.black),
+              onPressed: () {
+                Scaffold.of(context).openEndDrawer();
+              },
+            ),
           ),
         ],
       ),
+      endDrawer: Drawer(
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DrawerHeader(
+                child: Text('Menu', style: TextStyle(fontSize: 24)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Log Out'),
+                onTap: () async {
+                  await FirebaseAuth.instance.signOut();
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 24),
+                  Text(
+                    'We are processing your house registration...\nHang tight, this may take a few moments!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            )
           : SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -336,11 +380,37 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (_house == null && !_showHouseForm)
-                      Center(
-                        child: ElevatedButton(
-                          onPressed: () => _showRegisterHouseForm(),
-                          child: const Text('Register New House'),
-                        ),
+                      Column(
+                        children: [
+                          const SizedBox(height: 40),
+                          Center(
+                            child: Text(
+                              'Welcome! You haven\'t registered your property yet.\nLet your house earn for you – tap below to get started!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.blueGrey,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Center(
+                            child: ElevatedButton.icon(
+                              onPressed: () => _showRegisterHouseForm(),
+                              icon: const Icon(Icons.add_home),
+                              label: const Text('Register My House'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
                       ),
                     if (_showHouseForm) _buildHouseForm(),
                     if (_house != null && !_showHouseForm) ...[
@@ -360,9 +430,47 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                             ListTile(
                               title: Text(_house!.address),
                               subtitle: Text('Phone: ${_house!.phone}\nPrices: ${_house!.prices.map((p) => '${p['amount']} ${p['unit']}').join(', ')}\nAvailable: ${_house!.availableFrom.toLocal().toString().split(' ')[0]} to ${_house!.availableTo.toLocal().toString().split(' ')[0]}'),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.edit),
-                                onPressed: () => _showRegisterHouseForm(house: _house),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.edit),
+                                    onPressed: () => _showRegisterHouseForm(house: _house),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete, color: Colors.red),
+                                    onPressed: () async {
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          title: const Text('Delete House'),
+                                          content: const Text('Are you sure you want to delete your house registration?'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx, false),
+                                              child: const Text('Cancel'),
+                                            ),
+                                            ElevatedButton(
+                                              onPressed: () => Navigator.pop(ctx, true),
+                                              child: const Text('Delete'),
+                                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirm == true) {
+                                        final username = await _getUsernameFromFirestore();
+                                        if (username != null) {
+                                          await FirebaseFirestore.instance.collection('Houses').doc(username).delete();
+                                          setState(() { _house = null; });
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('House registration deleted.')),
+                                          );
+                                        }
+                                      }
+                                    },
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -404,11 +512,25 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
               ),
             ),
       bottomNavigationBar: StoraNovaNavBar(
-        currentIndex: _currentIndex,
+        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
         onTap: (index) {
+          if (index < 0 || index > 3) return; // Only allow valid indices
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 4) {
+          if (index == 0) {
+            // Home
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const OwnerHomePage()),
+            );
+          } else if (index == 1) {
+            // Wishlist (implement if needed)
+            // Navigator.pushReplacement(...)
+          } else if (index == 2) {
+            // Notification (implement if needed)
+            // Navigator.pushReplacement(...)
+          } else if (index == 3) {
+            // Profile
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => const ProfileScreen()),
@@ -708,6 +830,14 @@ class _HouseImageSliderState extends State<_HouseImageSlider> {
     );
   }
 
+  void _goToPage(int page) {
+    _controller.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -726,15 +856,33 @@ class _HouseImageSliderState extends State<_HouseImageSlider> {
             bottom: 8,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(widget.imageUrls.length, (i) => Container(
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _currentPage == i ? Colors.blue : Colors.grey,
+              children: [
+                // Left arrow
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios, size: 18),
+                  color: _currentPage > 0 ? Colors.blue : Colors.grey,
+                  onPressed: _currentPage > 0 ? () => _goToPage(_currentPage - 1) : null,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  constraints: const BoxConstraints(),
                 ),
-              )),
+                ...List.generate(widget.imageUrls.length, (i) => Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _currentPage == i ? Colors.blue : Colors.grey,
+                  ),
+                )),
+                // Right arrow
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward_ios, size: 18),
+                  color: _currentPage < widget.imageUrls.length - 1 ? Colors.blue : Colors.grey,
+                  onPressed: _currentPage < widget.imageUrls.length - 1 ? () => _goToPage(_currentPage + 1) : null,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  constraints: const BoxConstraints(),
+                ),
+              ],
             ),
           ),
       ],

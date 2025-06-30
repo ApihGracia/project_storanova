@@ -73,8 +73,14 @@ class DatabaseService {
     required DateTime availableTo,
     List<String> imageUrls = const [],
   }) async {
+    // Fetch owner name from AppUsers
+    String name = '';
+    final ownerDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(username).get();
+    if (ownerDoc.exists && ownerDoc.data() != null && ownerDoc.data()!['name'] != null) {
+      name = ownerDoc.data()!['name'];
+    }
     final houseData = {
-      'owner': username,
+      'owner': name,
       'address': address,
       'phone': phone,
       'prices': prices,

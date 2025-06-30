@@ -32,7 +32,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? email;
   String? username;
   bool isLoading = true;
-  int _currentIndex = 4; // Profile tab
+  int _currentIndex = 3; // 0: Home, 1: Wishlist, 2: Notification, 3: Profile
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -382,16 +382,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFFADD8E6),
+        automaticallyImplyLeading: false,
+        backgroundColor: const Color(0xFFB4D4FF),
         elevation: 0,
         title: Text(username != null && username!.isNotEmpty ? username! : 'Profile'),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () {},
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.more_vert),
+              onPressed: () {
+                Scaffold.of(context).openEndDrawer();
+              },
+            ),
           ),
         ],
+      ),
+    // ...existing code...
+      endDrawer: Drawer(
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const DrawerHeader(
+                child: Text('Menu', style: TextStyle(fontSize: 24)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout),
+                title: const Text('Log Out'),
+                onTap: () async {
+                  await FirebaseAuth.instance.signOut();
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+              ),
+            ],
+          ),
+        ),
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -529,26 +555,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(height: 24),
                           Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               if (!isEditing)
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed: isLoading ? null : _startEdit,
-                                    child: const Text('Edit'),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                                  child: SizedBox(
+                                    width: 120,
+                                    child: ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFB4D4FF), // Match app bar color
+                                        foregroundColor: Colors.black, // Text color for contrast
+                                      ),
+                                      onPressed: isLoading ? null : _startEdit,
+                                      child: const Text('Edit'),
+                                    ),
                                   ),
                                 ),
                               if (isEditing) ...[
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed: isLoading ? null : _saveProfile,
-                                    child: const Text('Save'),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                                  child: SizedBox(
+                                    width: 100,
+                                    child: ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFB4D4FF), // Match app bar color
+                                        foregroundColor: Colors.black, // Text color for contrast
+                                      ),
+                                      onPressed: isLoading ? null : _saveProfile,
+                                      child: const Text('Save'),
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: OutlinedButton(
-                                    onPressed: isLoading ? null : _cancelEdit,
-                                    child: const Text('Cancel'),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                                  child: SizedBox(
+                                    width: 100,
+                                    child: OutlinedButton(
+                                      onPressed: isLoading ? null : _cancelEdit,
+                                      child: const Text('Cancel'),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -562,23 +608,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
       bottomNavigationBar: StoraNovaNavBar(
-        currentIndex: _currentIndex,
+        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
         onTap: (index) {
+          if (index < 0 || index > 3) return;
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 2) {
+          if (index == 0) {
             // Home (dashboard)
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => CustHomePage()),
+              MaterialPageRoute(builder: (context) => const CustHomePage()),
             );
           } else if (index == 1) {
-            // Wishlist
-            Navigator.pushReplacementNamed(context, '/wishlist');
-          } else if (index == 4) {
-            // Already on profile
+            // Wishlist (implement if needed)
+            // Navigator.pushReplacement(...)
+          } else if (index == 2) {
+            // Notification (implement if needed)
+            // Navigator.pushReplacement(...)
+          } else if (index == 3) {
+            // Profile
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const ProfileScreen()),
+            );
           }
-          // Add navigation for other tabs as needed
         },
       ),
     );

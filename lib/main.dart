@@ -378,16 +378,29 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
           Center(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.8),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.all(20.0),
-              child: SingleChildScrollView(
-                child: showRegistration ? _buildRegistrationForm(context) : _buildLoginForm(context),
-              ),
-            ),
+            child: showRegistration
+                ? Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 50.0),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.all(20.0),
+                    child: SingleChildScrollView(
+                      child: _buildRegistrationForm(context),
+                    ),
+                  )
+                : Container(
+                    constraints: const BoxConstraints(maxWidth: 350),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.8),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.all(20.0),
+                    child: SingleChildScrollView(
+                      child: _buildLoginForm(context),
+                    ),
+                  ),
           ),
         ],
       ),
@@ -462,24 +475,23 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
         const SizedBox(height: 10),
-        Consumer<LoginFormData>(
-          builder: (context, formData, child) => Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Checkbox(
-                value: formData.rememberMe,
-                onChanged: (value) => formData.setRememberMe(value ?? false),
-              ),
-              const Text('Keep Me Logged In'),
-            ],
+        Center(
+          child: TextButton(
+            onPressed: () {
+              // Handle forgot password logic here
+            },
+            child: const Text(
+              'FORGOT PASSWORD?',
+              style: TextStyle(fontSize: 12, color: Colors.black),
+            ),
           ),
         ),
         const SizedBox(height: 20),
         ElevatedButton(
           onPressed: () => _handleLogin(context),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.green,
-            padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
+            backgroundColor: Colors.blue,
+            padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 10),
             textStyle: const TextStyle(fontSize: 18),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(25.0),
@@ -488,34 +500,18 @@ class _LoginPageState extends State<LoginPage> {
           child: const Text('LOG IN', style: TextStyle(color: Colors.white)),
         ),
         const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextButton(
-              onPressed: () {
-                // Handle forgot password logic here
-              },
-              child: const Text(
-                'FORGOT PASSWORD?',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
+        Center(
+          child: TextButton(
+            onPressed: () {
+              setState(() {
+                showRegistration = true;
+              });
+            },
+            child: const Text(
+              'NEW USER REGISTRATION',
+              style: TextStyle(fontSize: 12, color: Colors.black),
             ),
-            const Text(
-              '|',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  showRegistration = true;
-                });
-              },
-              child: const Text(
-                'NEW USER REGISTRATION',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 10),
         const Text(
@@ -723,37 +719,38 @@ class StoraNovaNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const activeColor = Colors.blue;
-    const inactiveColor = Colors.black54;
+    const inactiveColor = Colors.black;
     return BottomNavigationBar(
-      backgroundColor: const Color(0xFFADD8E6),
+      backgroundColor: const Color(0xFFB4D4FF),
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
       selectedItemColor: activeColor,
       unselectedItemColor: inactiveColor,
       selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
       onTap: onTap,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.search),
-          label: 'Explore',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.favorite_border),
-          label: 'Wishlist',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.notifications_none),
-          label: 'Notification',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          label: 'Profile',
-        ),
+      items: [
+        _buildNavBarItem(Icons.home, 'Home', 0),
+        _buildNavBarItem(Icons.favorite_border, 'Wishlist', 1),
+        _buildNavBarItem(Icons.notifications_none, 'Notification', 2),
+        _buildNavBarItem(Icons.person_outline, 'Profile', 3),
       ],
+    );
+  }
+
+  BottomNavigationBarItem _buildNavBarItem(IconData icon, String label, int index) {
+    final bool isActive = currentIndex == index;
+    return BottomNavigationBarItem(
+      icon: Container(
+        decoration: isActive
+            ? BoxDecoration(
+                color: Colors.blue.withOpacity(0.15),
+                shape: BoxShape.circle,
+              )
+            : null,
+        padding: const EdgeInsets.all(8),
+        child: Icon(icon),
+      ),
+      label: label,
     );
   }
 }
