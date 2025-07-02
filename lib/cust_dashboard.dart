@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // <-- Added import
 // StoraNovaNavBar is now available from main.dart
 import 'cust_profile.dart';
+import 'cust_wishlist.dart';
 // import 'package:provider/provider.dart';
 
 void main() {
@@ -309,7 +310,13 @@ class _CustHomePageState extends State<CustHomePage> {
           } else if (index == 1) {
             // Wishlist (implement if needed)
             // Navigator.pushReplacement(...)
-          } else if (index == 2) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const CustWishlistPage()),
+            );
+            } else if (index == 2) {
+            // Wishlist
+            
             // Notification (implement if needed)
             // Navigator.pushReplacement(...)
           } else if (index == 3) {
