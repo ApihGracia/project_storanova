@@ -303,7 +303,7 @@ class _LoginPageState extends State<LoginPage> {
           print('Debug: Redirecting banned user to notifications'); // Debug line
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => NotificationsPage()),
+            MaterialPageRoute(builder: (context) => NotificationsPage(expectedRole: role?.toLowerCase() ?? 'customer')),
           );
           return;
         }
@@ -769,51 +769,6 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ],
-    );
-  }
-}
-
-// Unified StoraNovaNavBar for both customer and owner, accessible from all pages
-class StoraNovaNavBar extends StatelessWidget {
-  final int currentIndex;
-  final Function(int) onTap;
-  const StoraNovaNavBar({required this.currentIndex, required this.onTap, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    const activeColor = Colors.blue;
-    const inactiveColor = Colors.black;
-    return BottomNavigationBar(
-      backgroundColor: const Color(0xFFB4D4FF),
-      type: BottomNavigationBarType.fixed,
-      currentIndex: currentIndex,
-      selectedItemColor: activeColor,
-      unselectedItemColor: inactiveColor,
-      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold),
-      onTap: onTap,
-      items: [
-        _buildNavBarItem(Icons.home, 'Home', 0),
-        _buildNavBarItem(Icons.favorite_border, 'Wishlist', 1),
-        _buildNavBarItem(Icons.notifications_none, 'Notification', 2),
-        _buildNavBarItem(Icons.person_outline, 'Profile', 3),
-      ],
-    );
-  }
-
-  BottomNavigationBarItem _buildNavBarItem(IconData icon, String label, int index) {
-    final bool isActive = currentIndex == index;
-    return BottomNavigationBarItem(
-      icon: Container(
-        decoration: isActive
-            ? BoxDecoration(
-                color: Colors.blue.withOpacity(0.15),
-                shape: BoxShape.circle,
-              )
-            : null,
-        padding: const EdgeInsets.all(8),
-        child: Icon(icon),
-      ),
-      label: label,
     );
   }
 }

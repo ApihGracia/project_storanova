@@ -74,13 +74,14 @@ class CustomerDrawer extends StatelessWidget {
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 32), // Add some spacing instead of Spacer
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('Log Out', style: TextStyle(color: Colors.red)),
               onTap: () => performLogout(context),
             ),
+            const Spacer(), // Keep remaining space at bottom
           ],
         ),
       ),
@@ -123,7 +124,7 @@ class CustomerNavBar extends StatelessWidget {
           case 2: // Notifications
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => NotificationsPage()),
+              MaterialPageRoute(builder: (context) => const NotificationsPage(expectedRole: 'customer')),
             );
             break;
           case 3: // Profile
@@ -216,13 +217,14 @@ class OwnerDrawer extends StatelessWidget {
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 32), // Add some spacing instead of Spacer
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('Log Out', style: TextStyle(color: Colors.red)),
               onTap: () => performLogout(context),
             ),
+            const Spacer(), // Keep remaining space at bottom
           ],
         ),
       ),
@@ -259,7 +261,7 @@ class OwnerNavBar extends StatelessWidget {
           case 1: // Notifications
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (context) => NotificationsPage()),
+              MaterialPageRoute(builder: (context) => const NotificationsPage(expectedRole: 'owner')),
             );
             break;
           case 2: // Profile
@@ -351,13 +353,14 @@ class AdminDrawer extends StatelessWidget {
                 ),
               ),
             ),
-            const Spacer(),
+            const SizedBox(height: 32), // Add some spacing instead of Spacer
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
               title: const Text('Log Out', style: TextStyle(color: Colors.red)),
               onTap: () => performLogout(context),
             ),
+            const Spacer(), // Keep remaining space at bottom
           ],
         ),
       ),

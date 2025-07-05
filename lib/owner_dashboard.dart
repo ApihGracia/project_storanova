@@ -70,7 +70,7 @@ class OwnerHomePage extends StatefulWidget {
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 0; // 0: Home, 1: Wishlist, 2: Notification, 3: Profile
+  int _currentIndex = 0; // 0: Dashboard, 1: Notifications, 2: Profile
   House? _house;
   bool _isLoading = true;
   bool _showHouseForm = false;
@@ -615,9 +615,9 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
               ),
             ),
       bottomNavigationBar: OwnerNavBar(
-        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
+        currentIndex: (_currentIndex >= 0 && _currentIndex <= 2) ? _currentIndex : 0,
         onTap: (index) {
-          if (index < 0 || index > 3) return; // Only allow valid indices
+          if (index < 0 || index > 2) return; // Only allow valid indices for owner nav (3 items)
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
         },

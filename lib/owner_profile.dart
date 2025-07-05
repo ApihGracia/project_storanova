@@ -69,7 +69,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? address;
   String? username;
   bool isLoading = true;
-  int _currentIndex = 3; // 0: Home, 1: Wishlist, 2: Notification, 3: Profile
+  int _currentIndex = 2; // 0: Dashboard, 1: Notifications, 2: Profile
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -540,7 +540,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       bottomNavigationBar: OwnerNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          if (index < 0 || index > 3) return; // Safety: only allow 0-3
+          if (index < 0 || index > 2) return; // Safety: only allow 0-2 for owner nav (3 items)
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
         },

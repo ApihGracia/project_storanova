@@ -5,6 +5,10 @@ import 'database.dart';
 import 'shared_widgets.dart';
 
 class NotificationsPage extends StatefulWidget {
+  final String? expectedRole; // Optional hint about user role
+  
+  const NotificationsPage({Key? key, this.expectedRole}) : super(key: key);
+  
   @override
   _NotificationsPageState createState() => _NotificationsPageState();
 }
@@ -14,14 +18,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
   List<Map<String, dynamic>> _notifications = [];
   bool _isLoading = true;
   bool _isBanned = false;
-  String _userRole = 'customer'; // Default to customer
+  String _userRole = 'customer'; // Will be updated based on expectedRole or detection
 
   @override
   void initState() {
     super.initState();
+    // Use the expected role hint if provided
+    if (widget.expectedRole != null) {
+      _userRole = widget.expectedRole!;
+    }
+    _detectUserRole(); // Detect role to confirm/correct
     _loadNotifications();
     _checkBanStatus();
-    _detectUserRole();
   }
 
   Future<void> _detectUserRole() async {
@@ -35,16 +43,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return;
       }
       
-      // Check in AppUsers collection for role
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('AppUsers')
-          .doc(user.uid)
-          .get();
-      
-      if (userDoc.exists && userDoc.data() != null) {
-        final data = userDoc.data() as Map<String, dynamic>;
-        setState(() => _userRole = data['role'] ?? 'customer');
-        return;
+      // First try to get username from display name
+      String? username = user.displayName;
+      if (username != null && username.isNotEmpty) {
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('AppUsers')
+            .doc(username)
+            .get();
+        
+        if (userDoc.exists && userDoc.data() != null) {
+          final data = userDoc.data() as Map<String, dynamic>;
+          setState(() => _userRole = data['role']?.toString().toLowerCase() ?? 'customer');
+          return;
+        }
       }
       
       // Fallback: check by email
@@ -56,11 +67,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
       
       if (query.docs.isNotEmpty) {
         final data = query.docs.first.data();
-        setState(() => _userRole = data['role'] ?? 'customer');
+        setState(() => _userRole = data['role']?.toString().toLowerCase() ?? 'customer');
       }
     } catch (e) {
-      // Default to customer on error
-      setState(() => _userRole = 'customer');
+      // Default to customer on error - no need to change since it's already customer
     }
   }
 
@@ -138,7 +148,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     Widget? bottomNavBar;
     
     // Choose appropriate navigation based on user role
-    switch (_userRole) {
+    switch (_userRole.toLowerCase()) {
       case 'admin':
         appBar = AdminAppBar(title: 'Notifications');
         drawer = AdminDrawer();
