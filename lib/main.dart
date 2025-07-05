@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'owner_dashboard.dart';
 import 'cust_dashboard.dart';
 import 'admin_dashboard.dart';
+import 'notifications_page.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'auth_service.dart';
@@ -211,13 +212,20 @@ class _LoginPageState extends State<LoginPage> {
     );
 
     try {
+      // IMPORTANT: Sign out any existing user first to prevent session conflicts
+      print("Current user before signOut: ${authService.currentUser?.email}");
+      await authService.signOut();
+      print("Successfully signed out, current user: ${authService.currentUser?.email}");
+      
       // Allow login with username or email
       String loginInput = formData.username.trim();
       String? emailToUse;
       if (isValidEmail(loginInput)) {
         emailToUse = loginInput;
+        print("Using email directly: $emailToUse");
       } else {
         // Lookup email by username
+        print("Looking up email for username: $loginInput");
         final userDoc = await dbService.getUserByUsername(loginInput);
         if (userDoc == null) {
           Navigator.of(context).pop();
@@ -227,6 +235,7 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
         emailToUse = userDoc['email'] as String?;
+        print("Found email for username: $emailToUse");
         if (emailToUse == null) {
           Navigator.of(context).pop();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -236,51 +245,101 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
+      print("Attempting to sign in with email: $emailToUse");
       final user = await authService.signInWithEmailPassword(
         emailToUse,
         formData.password,
       );
 
+      print("Sign in result: ${user != null ? 'Success (${user.email})' : 'Failed (null user)'}");
       Navigator.of(context).pop();
 
       if (user != null) {
+        print("Processing successful login for user: ${user.email}");
         String? role;
+        String username;
         // If login was by username, use it directly
         if (!isValidEmail(formData.username.trim())) {
-          role = await dbService.getUserRole(formData.username.trim());
+          username = formData.username.trim();
+          print("Using provided username: $username");
+          role = await dbService.getUserRole(username);
+          print("Role from database for $username: $role");
         } else {
           // If login was by email, need to find username by email
+          print("Looking up username by email: ${formData.username.trim()}");
           final usersSnapshot = await dbService.usersCollection.where('email', isEqualTo: formData.username.trim()).get();
           if (usersSnapshot.docs.isNotEmpty) {
+            username = usersSnapshot.docs.first.id;
             role = usersSnapshot.docs.first['role'] as String?;
+            print("Found username: $username, role: $role");
+          } else {
+            print("No user found with email: ${formData.username.trim()}");
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('User not found')),
+            );
+            return;
           }
         }
-        if (role == 'Owner') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => OwnerHomePage()),
-          );
-        } else if (role == 'Customer') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => CustHomePage()),
-          );
-        } else if (role == 'Admin') {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => AdminHomePage()),
-          );
-        } else {
+
+        if (role == null) {
+          print("Role is null for user: $username");
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('User role not found')),
           );
+          return;
+        }
+
+        // Check if user is banned
+        final userDoc = await dbService.getUserByUsername(username);
+        final Map<String, dynamic>? userData = userDoc?.data() as Map<String, dynamic>?;
+        final bool isUserBanned = userData != null && userData.containsKey('isBanned') 
+            ? userData['isBanned'] == true 
+            : false;
+
+        print('Debug: User $username, Role: $role, Banned: $isUserBanned'); // Debug line
+
+        if (isUserBanned) {
+          // Redirect banned users to notifications page
+          print('Debug: Redirecting banned user to notifications'); // Debug line
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => NotificationsPage()),
+          );
+          return;
+        }
+
+        print('Debug: Navigating to dashboard for role: $role'); // Debug line
+        final roleUpper = role.toUpperCase();
+        if (roleUpper == 'OWNER') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const OwnerHomePage()),
+          );
+        } else if (roleUpper == 'CUSTOMER') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const CustHomePage()),
+          );
+        } else if (roleUpper == 'ADMIN') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const AdminHomePage()),
+          );
+        } else {
+          print('Debug: Unknown role: $role');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid user role')),
+          );
         }
       } else {
+        print("Sign in failed - user is null");
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid username/email or password')),
         );
       }
     } catch (e) {
+      print("Exception in login: $e");
+      print("Stack trace: ${StackTrace.current}");
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),

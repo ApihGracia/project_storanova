@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
-import 'owner_profile.dart';
-import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'database.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-
-void main() {
-  runApp(OwnerDashboard());
-}
+import 'shared_widgets.dart';
 
 class OwnerDashboard extends StatelessWidget {
   @override
@@ -92,6 +88,11 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   bool _isUploadingImages = false;
   final ImagePicker _picker = ImagePicker();
   
+  // Proof of ownership
+  dynamic _proofOfOwnership; // Can be Uint8List for new or String for existing URL
+  String? _proofOfOwnershipType; // Track file type: 'image' or 'pdf'
+  bool _isUploadingProof = false;
+  
   // House applications data
   List<Map<String, dynamic>> _applications = [];
   bool _hasApprovedHouse = false;
@@ -146,6 +147,8 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         _availableFrom = house.availableFrom;
         _availableTo = house.availableTo;
         _formImages = List<dynamic>.from(house.imageUrls); // Always dynamic
+        _proofOfOwnership = null; // Reset proof for editing
+        _proofOfOwnershipType = null;
       } else {
         _houseAddressController.text = '';
         _housePhoneController.text = '';
@@ -155,6 +158,8 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         _availableFrom = null;
         _availableTo = null;
         _formImages = [];
+        _proofOfOwnership = null;
+        _proofOfOwnershipType = null;
       }
     });
   }
@@ -273,6 +278,26 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         setState(() { _isLoading = false; _isUploadingImages = false; });
         return;
       }
+      
+      // Upload proof of ownership if provided
+      String? proofUrl;
+      if (_proofOfOwnership != null) {
+        setState(() { _isUploadingProof = true; });
+        if (_proofOfOwnership is Uint8List) {
+          proofUrl = await _uploadImageToCloudinary(_proofOfOwnership);
+          if (proofUrl == null) {
+            setState(() { _isLoading = false; _isUploadingImages = false; _isUploadingProof = false; });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Failed to upload proof of ownership. Please try again.')),
+            );
+            return;
+          }
+        } else if (_proofOfOwnership is String) {
+          proofUrl = _proofOfOwnership;
+        }
+        setState(() { _isUploadingProof = false; });
+      }
+      
       if (_editingApplicationId != null) {
         // Update existing application
         await _db.updateHouseApplication(
@@ -284,6 +309,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           availableTo: _availableTo!,
           imageUrls: uploadedUrls,
           description: _descriptionController.text.trim(),
+          proofOfOwnershipUrl: proofUrl,
         );
       } else {
         // Check if owner already has an application
@@ -306,11 +332,14 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           availableTo: _availableTo!,
           imageUrls: uploadedUrls,
           description: _descriptionController.text.trim(),
+          proofOfOwnershipUrl: proofUrl,
         );
       }
       setState(() { 
         _showHouseForm = false; 
         _formImages = []; 
+        _proofOfOwnership = null;
+        _proofOfOwnershipType = null;
         _editingApplicationId = null; // Clear editing state
       });
       await _fetchHouseApplications();
@@ -324,7 +353,11 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         SnackBar(content: Text('Error: [${e.toString()}')),
       );
     } finally {
-      setState(() { _isLoading = false; _isUploadingImages = false; });
+      setState(() { 
+        _isLoading = false; 
+        _isUploadingImages = false; 
+        _isUploadingProof = false;
+      });
     }
   }
 
@@ -424,56 +457,8 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFFB4D4FF),
-        elevation: 0,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Image.network(
-              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-              width: 50,
-              height: 50,
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'StoraNova(owner)',
-              style: TextStyle(color: Colors.black),
-            ),
-          ],
-        ),
-        actions: [
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.more_vert, color: Colors.black),
-              onPressed: () {
-                Scaffold.of(context).openEndDrawer();
-              },
-            ),
-          ),
-        ],
-      ),
-      endDrawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const DrawerHeader(
-                child: Text('Menu', style: TextStyle(fontSize: 24)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log Out'),
-                onTap: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+      appBar: OwnerAppBar(title: 'StoraNova(owner)'),
+      endDrawer: OwnerDrawer(),
       body: _isLoading
           ? const Center(
               child: Column(
@@ -629,31 +614,12 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                 ),
               ),
             ),
-      bottomNavigationBar: StoraNovaNavBar(
+      bottomNavigationBar: OwnerNavBar(
         currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
         onTap: (index) {
           if (index < 0 || index > 3) return; // Only allow valid indices
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 0) {
-            // Home
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const OwnerHomePage()),
-            );
-          } else if (index == 1) {
-            // Wishlist (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 2) {
-            // Notification (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 3) {
-            // Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
-            );
-          }
         },
       ),
     );
@@ -878,6 +844,60 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                   hintText: 'Describe your property, amenities, location benefits, etc.',
                 ),
                 maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              
+              // Proof of Ownership Section
+              const Text('Proof of House Ownership (Required):', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Please upload a document that proves your ownership of the house (e.g., property deed, ownership certificate, etc.)',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    if (_proofOfOwnership == null) ...[
+                      Center(
+                        child: ElevatedButton.icon(
+                          onPressed: _isUploadingProof ? null : _pickProofOfOwnership,
+                          icon: _isUploadingProof 
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.upload_file),
+                          label: Text(_isUploadingProof ? 'Uploading...' : 'Upload Proof of Ownership (Image/PDF)'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.description, color: Colors.green),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text('Proof of ownership uploaded (${_proofOfOwnershipType ?? 'file'})')),
+                          IconButton(
+                            onPressed: _isUploadingProof ? null : () {
+                              setState(() {
+                                _proofOfOwnership = null;
+                                _proofOfOwnershipType = null;
+                              });
+                            },
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
               Row(
@@ -1294,6 +1314,16 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
       _formImages = [];
     }
     
+    // Parse proof of ownership
+    if (application['proofOfOwnershipUrl'] != null) {
+      _proofOfOwnership = application['proofOfOwnershipUrl'];
+      final url = application['proofOfOwnershipUrl'] as String;
+      _proofOfOwnershipType = url.toLowerCase().contains('.pdf') ? 'pdf' : 'image';
+    } else {
+      _proofOfOwnership = null;
+      _proofOfOwnershipType = null;
+    }
+    
     setState(() {
       _showHouseForm = true;
     });
@@ -1438,6 +1468,98 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _pickProofOfOwnership() async {
+    try {
+      // Show dialog to choose between image and PDF
+      final result = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Select Proof of Ownership'),
+          content: const Text('Choose the type of file you want to upload:'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('image'),
+              child: const Text('Image'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop('pdf'),
+              child: const Text('PDF'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+
+      if (result == null) return;
+
+      Uint8List? bytes;
+      
+      if (result == 'image') {
+        final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+        if (pickedFile == null) return;
+        
+        if (kIsWeb) {
+          bytes = await pickedFile.readAsBytes();
+        } else {
+          final file = File(pickedFile.path);
+          final fileSize = await file.length();
+          if (fileSize > 20 * 1024 * 1024) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Proof of ownership file must be below 20MB.')),
+            );
+            return;
+          }
+          bytes = await file.readAsBytes();
+        }
+        setState(() {
+          _proofOfOwnership = bytes;
+          _proofOfOwnershipType = 'image';
+        });
+      } else if (result == 'pdf') {
+        final pickedFile = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+          allowMultiple: false,
+        );
+        
+        if (pickedFile == null || pickedFile.files.isEmpty) return;
+        
+        final file = pickedFile.files.first;
+        
+        if (file.size > 20 * 1024 * 1024) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Proof of ownership file must be below 20MB.')),
+          );
+          return;
+        }
+        
+        if (kIsWeb && file.bytes != null) {
+          bytes = file.bytes!;
+        } else if (!kIsWeb && file.path != null) {
+          final fileObj = File(file.path!);
+          bytes = await fileObj.readAsBytes();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to read the selected file.')),
+          );
+          return;
+        }
+        
+        setState(() {
+          _proofOfOwnership = bytes;
+          _proofOfOwnershipType = 'pdf';
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error picking file: $e')),
+      );
+    }
   }
 }
 

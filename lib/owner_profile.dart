@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'main.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'owner_dashboard.dart'; // For Flutter web image picking
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
@@ -10,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:io';
+import 'shared_widgets.dart';
 
 void main() {
   runApp(const MyApp());
@@ -78,7 +77,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController _addressController = TextEditingController();
 
   Uint8List? _selectedImageBytes;
-  String? _selectedImageUrlPreview;
   bool _isUploadingImage = false;
 
   @override
@@ -152,7 +150,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _emailController.text = _originalEmail ?? '';
       _addressController.text = _originalAddress ?? '';
       _selectedImageBytes = null;
-      _selectedImageUrlPreview = null;
     });
   }
 
@@ -321,7 +318,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         imageUrl = uploadedImageUrl;
         isEditing = false;
         _selectedImageBytes = null;
-        _selectedImageUrlPreview = null;
       });
       await _loadProfile();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated!')));
@@ -338,44 +334,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFFB4D4FF),
-        elevation: 0,
-        title: Text(username != null && username!.isNotEmpty ? username! : 'Profile'),
-        centerTitle: true,
-        actions: [
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.more_vert),
-              onPressed: () {
-                Scaffold.of(context).openEndDrawer();
-              },
-            ),
-          ),
-        ],
-      ),
-    // ...existing code...
-      endDrawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const DrawerHeader(
-                child: Text('Menu', style: TextStyle(fontSize: 24)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log Out'),
-                onTap: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+      appBar: OwnerAppBar(title: username != null && username!.isNotEmpty ? username! : 'Profile'),
+      endDrawer: OwnerDrawer(),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -577,57 +537,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-      bottomNavigationBar: StoraNovaNavBar(
+      bottomNavigationBar: OwnerNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
           if (index < 0 || index > 3) return; // Safety: only allow 0-3
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 0) {
-            // Home
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const OwnerHomePage()),
-            );
-          } else if (index == 1) {
-            // Wishlist (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 2) {
-            // Notification (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 3) {
-            // Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
-            );
-          }
         },
-      ),
-    );
-  }
-  Widget _profileField(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.shade100),
-            ),
-            child: Text(value.isNotEmpty ? value : '', style: const TextStyle(fontSize: 16)),
-          ),
-        ],
       ),
     );
   }

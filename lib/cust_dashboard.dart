@@ -1,16 +1,6 @@
 import 'package:flutter/material.dart';
-import 'main.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart'; // <-- Added import
-// StoraNovaNavBar is now available from main.dart
-import 'cust_profile.dart';
-import 'cust_wishlist.dart';
-// import 'package:provider/provider.dart';
-
-void main() {
-  // runApp(const MyApp());
-  runApp(CustDashboard());
-}
+import 'shared_widgets.dart';
 
 class CustDashboard extends StatelessWidget {
   @override
@@ -66,60 +56,25 @@ class _CustHomePageState extends State<CustHomePage> {
 
   int _currentIndex = 0; // Start at "Home"
   String _sortBy = 'perDay'; // 'perDay' or 'perWeek'
+  late Future<List<Map<String, dynamic>>> _housesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _housesFuture = _fetchHouses();
+  }
+
+  void _refreshHouses() {
+    setState(() {
+      _housesFuture = _fetchHouses();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFFB4D4FF),
-        elevation: 0,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Image.network(
-              'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-              width: 50,
-              height: 50,
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'StoraNova(Customer)',
-              style: TextStyle(color: Colors.black),
-            ),
-          ],
-        ),
-        actions: [
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.more_vert, color: Colors.black),
-              onPressed: () {
-                Scaffold.of(context).openEndDrawer();
-              },
-            ),
-          ),
-        ],
-      ),
-      endDrawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const DrawerHeader(
-                child: Text('Menu', style: TextStyle(fontSize: 24)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log Out'),
-                onTap: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+      appBar: CustomerAppBar(title: 'StoraNova'),
+      endDrawer: const CustomerDrawer(),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -144,10 +99,27 @@ class _CustHomePageState extends State<CustHomePage> {
             const SizedBox(height: 8),
             Expanded(
               child: FutureBuilder<List<Map<String, dynamic>>>(
-                future: _fetchHouses(),
+                future: _housesFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.error, size: 64, color: Colors.red),
+                          const SizedBox(height: 16),
+                          Text('Error: ${snapshot.error}', style: const TextStyle(fontSize: 16)),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _refreshHouses,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    );
                   }
                   if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return const Center(
@@ -296,110 +268,51 @@ class _CustHomePageState extends State<CustHomePage> {
           ],
         ),
       ),
-      bottomNavigationBar: StoraNovaNavBar(
+      bottomNavigationBar: CustomerNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 0) {
-            // Home
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const CustHomePage()),
-            );
-          } else if (index == 1) {
-            // Wishlist (implement if needed)
-            // Navigator.pushReplacement(...)
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const CustWishlistPage()),
-            );
-            } else if (index == 2) {
-            // Wishlist
-            
-            // Notification (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 3) {
-            // Profile
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
-            );
-          }
         },
       ),
     );
   }
 
   Future<List<Map<String, dynamic>>> _fetchHouses() async {
-    // Fetch only approved and available houses
-    final houseSnapshot = await FirebaseFirestore.instance.collection('ApprovedHouses')
-        .where('isAvailable', isEqualTo: true)
-        .get();
-    if (houseSnapshot.docs.isEmpty) return [];
+    try {
+      // Fetch only approved and available houses
+      final houseSnapshot = await FirebaseFirestore.instance.collection('ApprovedHouses')
+          .where('isAvailable', isEqualTo: true)
+          .get();
+      if (houseSnapshot.docs.isEmpty) return [];
 
-    List<Map<String, dynamic>> houses = [];
-    for (var doc in houseSnapshot.docs) {
-      final data = doc.data();
-      houses.add({
-        'name': data['name'] ?? '',
-        'address': data['address'] ?? '',
-        'pricePerDay': data['pricePerDay'],
-        'pricePerWeek': data['pricePerWeek'],
-        'imageUrl': data['imageUrl'] ?? '',
-        'imageUrls': data['imageUrls'] ?? [],
-        'owner': data['owner'] ?? data['ownerName'] ?? '', // Use owner name from approved data
-        'phone': data['phone'] ?? '',
-        'prices': data['prices'] ?? [],
-        'availableFrom': data['availableFrom'],
-        'availableTo': data['availableTo'],
-        'description': data['description'] ?? '',
-      });
+      List<Map<String, dynamic>> houses = [];
+      for (var doc in houseSnapshot.docs) {
+        final data = doc.data();
+        
+        // Filter out banned houses
+        final isHouseBanned = data['isHouseBanned'] ?? false;
+        if (isHouseBanned) continue;
+        
+        houses.add({
+          'name': data['name'] ?? '',
+          'address': data['address'] ?? '',
+          'pricePerDay': data['pricePerDay'],
+          'pricePerWeek': data['pricePerWeek'],
+          'imageUrl': data['imageUrl'] ?? '',
+          'imageUrls': data['imageUrls'] ?? [],
+          'owner': data['owner'] ?? data['ownerName'] ?? '', // Use owner name from approved data
+          'phone': data['phone'] ?? '',
+          'prices': data['prices'] ?? [],
+          'availableFrom': data['availableFrom'],
+          'availableTo': data['availableTo'],
+          'description': data['description'] ?? '',
+        });
+      }
+      return houses;
+    } catch (e) {
+      // Re-throw the error so FutureBuilder can handle it
+      throw Exception('Failed to fetch houses: $e');
     }
-    return houses;
-  }
-
-  Widget _buildServiceButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 30, color: Colors.blue),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNewsCard({required String imageUrl}) {
-    return Card(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: NetworkImage(imageUrl),
-            fit: BoxFit.cover,
-          ),
-        ),
-      ),
-    );
   }
 }
 

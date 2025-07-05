@@ -8,13 +8,18 @@ class AuthService {
   // Sign in with email and password
   Future<User?> signInWithEmailPassword(String email, String password) async {
     try {
+      print("AuthService: Attempting to sign in with email: $email");
       UserCredential result = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+      print("AuthService: Sign in successful, user: ${result.user?.email}");
       return result.user;
     } on FirebaseAuthException catch (e) {
       print("Error signing in: ${e.code} - ${e.message}");
+      return null;
+    } catch (e) {
+      print("Unexpected error signing in: $e");
       return null;
     }
   }
@@ -48,8 +53,19 @@ class AuthService {
 
   // Sign out
   Future<void> signOut() async {
-    await _auth.signOut();
+    try {
+      await _auth.signOut();
+      print("User signed out successfully");
+    } catch (e) {
+      print("Error signing out: $e");
+    }
   }
+
+  // Get current user
+  User? get currentUser => _auth.currentUser;
+
+  // Check if user is signed in
+  bool get isSignedIn => _auth.currentUser != null;
 
   Future<void> sendPasswordResetEmail(String email) async {
   await _auth.sendPasswordResetEmail(email: email);

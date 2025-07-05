@@ -6,10 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'cust_dashboard.dart';
-import 'main.dart';
-
-// StoraNovaNavBar is now imported from main.dart
+import 'shared_widgets.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -381,44 +378,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFFB4D4FF),
-        elevation: 0,
-        title: Text(username != null && username!.isNotEmpty ? username! : 'Profile'),
-        centerTitle: true,
-        actions: [
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.more_vert),
-              onPressed: () {
-                Scaffold.of(context).openEndDrawer();
-              },
-            ),
-          ),
-        ],
-      ),
-    // ...existing code...
-      endDrawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const DrawerHeader(
-                child: Text('Menu', style: TextStyle(fontSize: 24)),
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Log Out'),
-                onTap: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+      appBar: CustomerAppBar(title: username != null && username!.isNotEmpty ? username! : 'Profile'),
+      endDrawer: const CustomerDrawer(),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -607,31 +568,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ),
-      bottomNavigationBar: StoraNovaNavBar(
-        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
+      bottomNavigationBar: CustomerNavBar(
+        currentIndex: _currentIndex,
         onTap: (index) {
-          if (index < 0 || index > 3) return;
-          if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
-          if (index == 0) {
-            // Home (dashboard)
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const CustHomePage()),
-            );
-          } else if (index == 1) {
-            // Wishlist (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 2) {
-            // Notification (implement if needed)
-            // Navigator.pushReplacement(...)
-          } else if (index == 3) {
-            // Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const ProfileScreen()),
-            );
-          }
         },
       ),
     );

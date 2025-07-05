@@ -26,11 +26,20 @@ class DatabaseService {
 
   // READ: Get user document by username (username is now the document ID)
   Future<DocumentSnapshot?> getUserByUsername(String username) async {
-    final doc = await usersCollection.doc(username).get();
-    if (doc.exists) {
-      return doc;
+    print("DatabaseService: Getting user document for username: $username");
+    try {
+      final doc = await usersCollection.doc(username).get();
+      if (doc.exists) {
+        print("DatabaseService: Found user document for $username");
+        return doc;
+      } else {
+        print("DatabaseService: No user document found for $username");
+        return null;
+      }
+    } catch (e) {
+      print("DatabaseService: Error getting user document for $username: $e");
+      return null;
     }
-    return null;
   }
 
   // UPDATE: Update user info by username
@@ -58,11 +67,21 @@ class DatabaseService {
 
   // Get user role by username (username is now the document ID)
   Future<String?> getUserRole(String username) async {
-    final doc = await usersCollection.doc(username).get();
-    if (doc.exists) {
-      return doc['role'] as String?;
+    print("DatabaseService: Getting role for username: $username");
+    try {
+      final doc = await usersCollection.doc(username).get();
+      if (doc.exists) {
+        final role = doc['role'] as String?;
+        print("DatabaseService: Found role for $username: $role");
+        return role;
+      } else {
+        print("DatabaseService: No document found for username: $username");
+        return null;
+      }
+    } catch (e) {
+      print("DatabaseService: Error getting role for $username: $e");
+      return null;
     }
-    return null;
   }
 
   // CREATE: Register a new house for owner with username as document ID
@@ -104,6 +123,7 @@ class DatabaseService {
     required DateTime availableTo,
     List<String> imageUrls = const [],
     String? description,
+    String? proofOfOwnershipUrl, // Added proof of ownership
   }) async {
     // Get owner details
     final ownerDoc = await usersCollection.doc(ownerUsername).get();
@@ -126,6 +146,7 @@ class DatabaseService {
       'availableTo': availableTo.toIso8601String(),
       'imageUrls': imageUrls,
       'description': description ?? '',
+      'proofOfOwnershipUrl': proofOfOwnershipUrl, // Added proof of ownership
       'status': 'pending', // pending, approved, rejected
       'submittedAt': DateTime.now().toIso8601String(),
       'reviewedAt': null,
@@ -224,6 +245,7 @@ class DatabaseService {
     required DateTime availableTo,
     List<String> imageUrls = const [],
     String? description,
+    String? proofOfOwnershipUrl, // Added proof of ownership
   }) async {
     final updateData = {
       'address': address,
@@ -233,6 +255,7 @@ class DatabaseService {
       'availableTo': availableTo.toIso8601String(),
       'imageUrls': imageUrls,
       'description': description ?? '',
+      'proofOfOwnershipUrl': proofOfOwnershipUrl, // Added proof of ownership
       'status': 'pending', // Reset to pending when updated
       'submittedAt': DateTime.now().toIso8601String(), // Update submission time
       'reviewedAt': null, // Clear previous review
@@ -307,6 +330,253 @@ class DatabaseService {
       final data = doc.data() as Map<String, dynamic>;
       data['id'] = doc.id;
       return data;
+    }).where((house) {
+      // Filter out banned houses
+      return !(house['isHouseBanned'] ?? false);
     }).toList();
+  }
+
+  // USER MANAGEMENT METHODS
+  // READ: Get all users with optional role filter
+  Future<List<Map<String, dynamic>>> getAllUsers({String? role}) async {
+    Query query = usersCollection;
+    if (role != null) {
+      query = query.where('role', isEqualTo: role);
+    }
+    
+    final snapshot = await query.get();
+    return snapshot.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      data['id'] = doc.id; // This will be the username
+      return data;
+    }).toList();
+  }
+
+  // UPDATE: Ban/Unban user
+  Future<void> updateUserBanStatus({
+    required String username,
+    required bool isBanned,
+    String? banReason,
+    String? bannedBy,
+  }) async {
+    await usersCollection.doc(username).update({
+      'isBanned': isBanned,
+      'banReason': banReason,
+      'bannedBy': bannedBy,
+      'banDate': isBanned ? DateTime.now().toIso8601String() : null,
+    });
+  }
+
+  // UPDATE: Ban house specifically
+  Future<void> updateHouseBanStatus({
+    required String ownerUsername,
+    required bool isHouseBanned,
+    String? houseBanReason,
+    String? bannedBy,
+  }) async {
+    // Update approved house ban status
+    final houseDoc = await approvedHousesCollection.doc(ownerUsername).get();
+    if (houseDoc.exists) {
+      await approvedHousesCollection.doc(ownerUsername).update({
+        'isHouseBanned': isHouseBanned,
+        'houseBanReason': houseBanReason,
+        'houseBannedBy': bannedBy,
+        'houseBanDate': isHouseBanned ? DateTime.now().toIso8601String() : null,
+      });
+    }
+  }
+
+  // CREATE: Add notification for user with meaningful document ID
+  Future<void> addNotification({
+    required String username,
+    required String title,
+    required String message,
+    required String type, // 'ban', 'warning', 'info', 'appeal', 'booking'
+    String? relatedDocumentId, // For appeals, house bookings, etc.
+  }) async {
+    // Get the next index for this type and user
+    final existingSnapshot = await FirebaseFirestore.instance
+        .collection('Notifications')
+        .where('username', isEqualTo: username)
+        .where('type', isEqualTo: type)
+        .get();
+    
+    final nextIndex = existingSnapshot.docs.length + 1;
+    final documentId = '${type}_${username}_$nextIndex';
+    
+    await FirebaseFirestore.instance.collection('Notifications').doc(documentId).set({
+      'username': username,
+      'title': title,
+      'message': message,
+      'type': type,
+      'createdAt': DateTime.now().toIso8601String(),
+      'isRead': false,
+      'relatedDocumentId': relatedDocumentId,
+    });
+  }
+
+  // CREATE: Submit appeal for banned user
+  Future<void> submitAppeal({
+    required String username,
+    required String appealReason,
+    required String banType, // 'user' or 'house'
+  }) async {
+    // Get the next appeal index for this user
+    final existingAppeals = await FirebaseFirestore.instance
+        .collection('Appeals')
+        .where('username', isEqualTo: username)
+        .get();
+    
+    final nextIndex = existingAppeals.docs.length + 1;
+    final appealId = 'appeal_${username}_$nextIndex';
+    
+    await FirebaseFirestore.instance.collection('Appeals').doc(appealId).set({
+      'username': username,
+      'appealReason': appealReason,
+      'banType': banType,
+      'status': 'pending', // pending, approved, rejected
+      'submittedAt': DateTime.now().toIso8601String(),
+      'reviewedAt': null,
+      'reviewedBy': null,
+      'reviewComments': null,
+    });
+
+    // Add notification to user
+    await addNotification(
+      username: username,
+      title: 'Appeal Submitted',
+      message: 'Your appeal has been submitted and is being reviewed by the admin.',
+      type: 'appeal',
+      relatedDocumentId: appealId,
+    );
+
+    // Add notification to admin
+    await addNotification(
+      username: 'admin', // Assuming admin username is 'admin'
+      title: 'New Appeal Submitted',
+      message: 'User $username has submitted an appeal for review.',
+      type: 'appeal',
+      relatedDocumentId: appealId,
+    );
+  }
+
+  // READ: Get appeals for admin
+  Future<List<Map<String, dynamic>>> getAllAppeals({String? status}) async {
+    Query query = FirebaseFirestore.instance.collection('Appeals');
+    if (status != null) {
+      query = query.where('status', isEqualTo: status);
+    }
+    
+    final snapshot = await query.get();
+    final appeals = snapshot.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      data['id'] = doc.id;
+      return data;
+    }).toList();
+    
+    // Sort by submittedAt descending (newest first)
+    appeals.sort((a, b) {
+      final aDate = DateTime.parse(a['submittedAt']);
+      final bDate = DateTime.parse(b['submittedAt']);
+      return bDate.compareTo(aDate);
+    });
+    
+    return appeals;
+  }
+
+  // UPDATE: Review appeal
+  Future<void> reviewAppeal({
+    required String appealId,
+    required String status, // 'approved' or 'rejected'
+    required String reviewedBy,
+    String? reviewComments,
+  }) async {
+    // Get the appeal document
+    final appealDoc = await FirebaseFirestore.instance
+        .collection('Appeals')
+        .doc(appealId)
+        .get();
+    
+    if (!appealDoc.exists) return;
+    
+    final appealData = appealDoc.data() as Map<String, dynamic>;
+    final username = appealData['username'] as String;
+    final banType = appealData['banType'] as String;
+    
+    // Update appeal status
+    await FirebaseFirestore.instance.collection('Appeals').doc(appealId).update({
+      'status': status,
+      'reviewedAt': DateTime.now().toIso8601String(),
+      'reviewedBy': reviewedBy,
+      'reviewComments': reviewComments,
+    });
+
+    // If approved, unban the user/house
+    if (status == 'approved') {
+      if (banType == 'user') {
+        await updateUserBanStatus(
+          username: username,
+          isBanned: false,
+          banReason: null,
+          bannedBy: reviewedBy,
+        );
+      } else if (banType == 'house') {
+        await updateHouseBanStatus(
+          ownerUsername: username,
+          isHouseBanned: false,
+          houseBanReason: null,
+          bannedBy: reviewedBy,
+        );
+      }
+      
+      // Notify user of successful appeal
+      await addNotification(
+        username: username,
+        title: 'Appeal Approved',
+        message: 'Your appeal has been approved. ${banType == 'user' ? 'Your account' : 'Your house'} has been unbanned.',
+        type: 'appeal',
+        relatedDocumentId: appealId,
+      );
+    } else {
+      // Notify user of rejected appeal
+      await addNotification(
+        username: username,
+        title: 'Appeal Rejected',
+        message: 'Your appeal has been rejected. ${reviewComments != null ? 'Reason: $reviewComments' : ''}',
+        type: 'appeal',
+        relatedDocumentId: appealId,
+      );
+    }
+  }
+
+  // READ: Get notifications for user
+  Future<List<Map<String, dynamic>>> getUserNotifications(String username) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Notifications')
+        .where('username', isEqualTo: username)
+        .get();
+        
+    List<Map<String, dynamic>> notifications = snapshot.docs.map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return data;
+    }).toList();
+    
+    // Sort by createdAt in descending order (newest first)
+    notifications.sort((a, b) {
+      final aDate = DateTime.parse(a['createdAt']);
+      final bDate = DateTime.parse(b['createdAt']);
+      return bDate.compareTo(aDate);
+    });
+    
+    return notifications;
+  }
+
+  // UPDATE: Mark notification as read
+  Future<void> markNotificationAsRead(String notificationId) async {
+    await FirebaseFirestore.instance
+        .collection('Notifications')
+        .doc(notificationId)
+        .update({'isRead': true});
   }
 }
