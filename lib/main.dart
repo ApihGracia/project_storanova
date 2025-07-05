@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'owner_dashboard.dart';
 import 'cust_dashboard.dart';
+import 'admin_dashboard.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'auth_service.dart';
@@ -43,7 +44,6 @@ class LoginFormData extends ChangeNotifier {
   }
 
   Future<void> _loadSavedCredentials() async {
-    if (_prefs == null) return;
     username = _prefs.getString('saved_username') ?? '';
     password = _prefs.getString('saved_password') ?? '';
     rememberMe = _prefs.getBool('remember_me') ?? false;
@@ -51,7 +51,6 @@ class LoginFormData extends ChangeNotifier {
   }
 
   Future<void> _saveCredentials() async {
-    if (_prefs == null) return;
     if (rememberMe) {
       await _prefs.setString('saved_username', username);
       await _prefs.setString('saved_password', password);
@@ -265,6 +264,11 @@ class _LoginPageState extends State<LoginPage> {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => CustHomePage()),
+          );
+        } else if (role == 'Admin') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => AdminHomePage()),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

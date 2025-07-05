@@ -81,6 +81,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   final _houseFormKey = GlobalKey<FormState>();
   final TextEditingController _houseAddressController = TextEditingController();
   final TextEditingController _housePhoneController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
   List<Map<String, dynamic>> _prices = [];
   String _priceUnit = 'per day';
   DateTime? _availableFrom;
@@ -90,11 +91,20 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   List<dynamic> _formImages = [];
   bool _isUploadingImages = false;
   final ImagePicker _picker = ImagePicker();
+  
+  // House applications data
+  List<Map<String, dynamic>> _applications = [];
+  bool _hasApprovedHouse = false;
+  String? _editingApplicationId; // Track if we're editing an existing application
+
+  // House status data
+  bool _houseIsAvailable = true;
+  bool _isUpdatingStatus = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchHouse();
+    _fetchHouseApplications();
   }
 
   Future<String?> _getUsernameFromFirestore() async {
@@ -124,23 +134,10 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     return null;
   }
 
-  Future<void> _fetchHouse() async {
-    setState(() { _isLoading = true; });
-    final username = await _getUsernameFromFirestore();
-    if (username == null) {
-      setState(() { _isLoading = false; });
-      return;
-    }
-    final doc = await FirebaseFirestore.instance.collection('Houses').doc(username).get();
-    setState(() {
-      _house = doc.exists ? House.fromMap(doc.id, doc.data()!) : null;
-      _isLoading = false;
-    });
-  }
-
   void _showRegisterHouseForm({House? house}) {
     setState(() {
       _showHouseForm = true;
+      _editingApplicationId = null; // Clear editing state for new application
       if (house != null) {
         _houseAddressController.text = house.address;
         _housePhoneController.text = house.phone;
@@ -152,6 +149,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
       } else {
         _houseAddressController.text = '';
         _housePhoneController.text = '';
+        _descriptionController.text = '';
         _prices = [];
         _priceUnit = 'per day';
         _availableFrom = null;
@@ -275,19 +273,51 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         setState(() { _isLoading = false; _isUploadingImages = false; });
         return;
       }
-      await _db.createHouse(
-        username: username,
-        address: _houseAddressController.text.trim(),
-        phone: _housePhoneController.text.trim(),
-        prices: _prices,
-        availableFrom: _availableFrom!,
-        availableTo: _availableTo!,
-        imageUrls: uploadedUrls,
-      );
-      setState(() { _showHouseForm = false; _formImages = []; });
-      await _fetchHouse();
+      if (_editingApplicationId != null) {
+        // Update existing application
+        await _db.updateHouseApplication(
+          applicationId: _editingApplicationId!,
+          address: _houseAddressController.text.trim(),
+          phone: _housePhoneController.text.trim(),
+          prices: _prices,
+          availableFrom: _availableFrom!,
+          availableTo: _availableTo!,
+          imageUrls: uploadedUrls,
+          description: _descriptionController.text.trim(),
+        );
+      } else {
+        // Check if owner already has an application
+        final hasExisting = await _db.hasExistingApplication(username);
+        if (hasExisting) {
+          setState(() { _isLoading = false; _isUploadingImages = false; });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('You already have an application. Please edit your existing application instead.')),
+          );
+          return;
+        }
+        
+        // Submit new application
+        await _db.submitHouseApplication(
+          ownerUsername: username,
+          address: _houseAddressController.text.trim(),
+          phone: _housePhoneController.text.trim(),
+          prices: _prices,
+          availableFrom: _availableFrom!,
+          availableTo: _availableTo!,
+          imageUrls: uploadedUrls,
+          description: _descriptionController.text.trim(),
+        );
+      }
+      setState(() { 
+        _showHouseForm = false; 
+        _formImages = []; 
+        _editingApplicationId = null; // Clear editing state
+      });
+      await _fetchHouseApplications();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('House registered/updated successfully!')),
+        SnackBar(content: Text(_editingApplicationId != null 
+          ? 'Application updated successfully! Please wait for admin review.' 
+          : 'House application submitted successfully! Please wait for admin approval.')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -298,10 +328,96 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     }
   }
 
+  Future<void> _fetchHouseApplications() async {
+    setState(() { _isLoading = true; });
+    final username = await _getUsernameFromFirestore();
+    if (username == null) {
+      setState(() { _isLoading = false; });
+      return;
+    }
+    
+    try {
+      // Fetch applications for this owner
+      final applications = await _db.getHouseApplicationsByOwner(username);
+      
+      // Check if owner has approved house
+      final hasApproved = await _db.hasApprovedHouse(username);
+      
+      setState(() {
+        _applications = applications;
+        _hasApprovedHouse = hasApproved;
+        _isLoading = false;
+      });
+      
+      // Fetch house status if approved
+      if (hasApproved) {
+        await _fetchHouseStatus();
+      }
+    } catch (e) {
+      setState(() { _isLoading = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error fetching applications: $e')),
+      );
+    }
+  }
+
+  Future<void> _fetchHouseStatus() async {
+    if (!_hasApprovedHouse) return;
+    
+    final username = await _getUsernameFromFirestore();
+    if (username == null) return;
+    
+    try {
+      final status = await _db.getHouseStatus(username);
+      setState(() {
+        _houseIsAvailable = status;
+      });
+    } catch (e) {
+      // Handle error silently or show message
+    }
+  }
+
+  Future<void> _toggleHouseStatus() async {
+    final username = await _getUsernameFromFirestore();
+    if (username == null) return;
+    
+    setState(() {
+      _isUpdatingStatus = true;
+    });
+    
+    try {
+      await _db.updateHouseStatus(
+        ownerUsername: username,
+        isAvailable: !_houseIsAvailable,
+      );
+      
+      setState(() {
+        _houseIsAvailable = !_houseIsAvailable;
+        _isUpdatingStatus = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_houseIsAvailable 
+            ? 'Your house is now available for bookings'
+            : 'Your house is now hidden from customers'),
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        _isUpdatingStatus = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating status: $e')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _houseAddressController.dispose();
     _housePhoneController.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 
@@ -379,13 +495,13 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_house == null && !_showHouseForm)
+                    if (!_hasApprovedHouse && _applications.isEmpty && !_showHouseForm)
                       Column(
                         children: [
                           const SizedBox(height: 40),
                           Center(
                             child: Text(
-                              'Welcome! You haven\'t registered your property yet.\nLet your house earn for you – tap below to get started!',
+                              'Welcome! Submit your house application for admin approval.\nOnce approved, you can start earning!',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontSize: 18,
@@ -399,7 +515,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                             child: ElevatedButton.icon(
                               onPressed: () => _showRegisterHouseForm(),
                               icon: const Icon(Icons.add_home),
-                              label: const Text('Register My House'),
+                              label: const Text('Submit House Application'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.blue,
                                 foregroundColor: Colors.white,
@@ -412,6 +528,8 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                           const SizedBox(height: 20),
                         ],
                       ),
+                    if (_applications.isNotEmpty && !_showHouseForm) 
+                      _buildApplicationsList(),
                     if (_showHouseForm) _buildHouseForm(),
                     if (_house != null && !_showHouseForm) ...[
                       const Text('Your House:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
@@ -565,7 +683,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Register/Edit House', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const Text('Register/Edit House Application', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               const SizedBox(height: 12),
               // Unified image preview and delete for both uploaded and new images
               Row(
@@ -680,7 +798,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                     Expanded(
                       child: TextFormField(
                         initialValue: entry.value['amount'],
-                        decoration: const InputDecoration(labelText: 'Price'),
+                        decoration: const InputDecoration(labelText: 'Price (RM)'),
                         keyboardType: TextInputType.number,
                         onChanged: (val) => _prices[idx]['amount'] = val,
                         validator: (v) => v == null || v.isEmpty ? 'Required' : null,
@@ -752,13 +870,22 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _descriptionController,
+                decoration: const InputDecoration(
+                  labelText: 'Description (Optional)',
+                  hintText: 'Describe your property, amenities, location benefits, etc.',
+                ),
+                maxLines: 3,
+              ),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   ElevatedButton(
                     onPressed: _submitHouse,
-                    child: const Text('Submit'),
+                    child: Text(_editingApplicationId != null ? 'Update Application' : 'Submit Application'),
                   ),
                   const SizedBox(width: 8),
                   OutlinedButton(
@@ -766,6 +893,545 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                     child: const Text('Cancel'),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildApplicationsList() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'House Applications',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+
+          ],
+        ),
+        const SizedBox(height: 16),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _applications.length,
+          itemBuilder: (context, index) {
+            final application = _applications[index];
+            return _buildApplicationCard(application);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildApplicationCard(Map<String, dynamic> application) {
+    final status = application['status'] as String;
+    final submittedAt = DateTime.parse(application['submittedAt']);
+    
+    Color statusColor;
+    IconData statusIcon;
+    switch (status.toLowerCase()) {
+      case 'pending':
+        statusColor = Colors.orange;
+        statusIcon = Icons.hourglass_empty;
+        break;
+      case 'approved':
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+        break;
+      case 'rejected':
+        statusColor = Colors.red;
+        statusIcon = Icons.cancel;
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusIcon = Icons.help;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with address and status
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    application['address'] ?? 'No address',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: statusColor, width: 1.5),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(statusIcon, size: 16, color: statusColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Application details
+            _buildDetailRow('Phone', application['phone'] ?? 'N/A'),
+            _buildDetailRow('Submitted', _formatDate(submittedAt)),
+            
+            if (application['description'] != null && application['description'].isNotEmpty)
+              _buildDetailRow('Description', application['description']),
+            
+            // Pricing information
+            if (application['prices'] != null && (application['prices'] as List).isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text('Pricing:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...(application['prices'] as List).map((price) => Padding(
+                padding: const EdgeInsets.only(left: 16, top: 2),
+                child: Text('• RM${price['amount']} ${price['unit']}'),
+              )),
+            ],
+            
+            // Availability
+            if (application['availableFrom'] != null && application['availableTo'] != null) ...[
+              const SizedBox(height: 8),
+              _buildDetailRow('Available From', _formatDate(DateTime.parse(application['availableFrom']))),
+              _buildDetailRow('Available To', _formatDate(DateTime.parse(application['availableTo']))),
+            ],
+            
+            // Review information
+            if (application['reviewedAt'] != null) ...[
+              const SizedBox(height: 12),
+              const Divider(),
+              const SizedBox(height: 8),
+              _buildDetailRow('Reviewed', _formatDate(DateTime.parse(application['reviewedAt']))),
+              _buildDetailRow('Reviewed By', application['reviewedBy'] ?? 'N/A'),
+              if (application['reviewComments'] != null && application['reviewComments'].isNotEmpty)
+                _buildDetailRow('Admin Comments', application['reviewComments'], isComment: true),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // Status messages and actions
+            if (status == 'pending') ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.schedule, color: Colors.orange, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Your application is being reviewed by the admin. You can edit it while it\'s pending.',
+                        style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _editApplication(application),
+                      icon: const Icon(Icons.edit, size: 18),
+                      label: const Text('Edit Application'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showApplicationDetails(application),
+                      icon: const Icon(Icons.visibility, size: 18),
+                      label: const Text('View Details'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (status == 'approved') ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Congratulations! Your house has been approved and is now available for customers.',
+                        style: TextStyle(color: Colors.green, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              // House Status Toggle
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _houseIsAvailable ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _houseIsAvailable ? Colors.blue.withOpacity(0.3) : Colors.orange.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _houseIsAvailable ? Icons.visibility : Icons.visibility_off,
+                      color: _houseIsAvailable ? Colors.blue : Colors.orange,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _houseIsAvailable 
+                          ? 'Your house is visible to customers and accepting bookings'
+                          : 'Your house is hidden from customers (not accepting bookings)',
+                        style: TextStyle(
+                          color: _houseIsAvailable ? Colors.blue : Colors.orange,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (_isUpdatingStatus)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      Switch(
+                        value: _houseIsAvailable,
+                        onChanged: (value) => _toggleHouseStatus(),
+                        activeColor: Colors.green,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _editApprovedHouse(application),
+                      icon: const Icon(Icons.edit, size: 18),
+                      label: const Text('Edit (Requires Re-approval)'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showApplicationDetails(application),
+                      icon: const Icon(Icons.visibility, size: 18),
+                      label: const Text('View Details'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (status == 'rejected') ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.cancel, color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Your application was rejected. Please review the admin comments and submit a new application.',
+                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _editApplication(application),
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Resubmit Application'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showApplicationDetails(application),
+                      icon: const Icon(Icons.visibility, size: 18),
+                      label: const Text('View Details'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.blue,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, {bool isComment = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.grey),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontStyle: isComment ? FontStyle.italic : FontStyle.normal,
+                color: isComment ? Colors.grey[600] : Colors.black,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  void _editApplication(Map<String, dynamic> application) {
+    // Set editing state - now using owner username as ID
+    _editingApplicationId = application['ownerUsername'];
+    
+    // Pre-fill the form with existing application data
+    _houseAddressController.text = application['address'] ?? '';
+    _housePhoneController.text = application['phone'] ?? '';
+    _descriptionController.text = application['description'] ?? '';
+    
+    // Parse prices
+    if (application['prices'] != null) {
+      _prices = List<Map<String, dynamic>>.from(application['prices']);
+    } else {
+      _prices = [];
+    }
+    
+    // Parse dates
+    if (application['availableFrom'] != null) {
+      _availableFrom = DateTime.parse(application['availableFrom']);
+    }
+    if (application['availableTo'] != null) {
+      _availableTo = DateTime.parse(application['availableTo']);
+    }
+    
+    // Parse images
+    if (application['imageUrls'] != null) {
+      _formImages = List<dynamic>.from(application['imageUrls']);
+    } else {
+      _formImages = [];
+    }
+    
+    setState(() {
+      _showHouseForm = true;
+    });
+  }
+
+  void _editApprovedHouse(Map<String, dynamic> application) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Approved House'),
+        content: const Text(
+          'Editing an approved house will require re-approval from the admin. '
+          'Your house will be temporarily unavailable to customers until the admin reviews your changes.\n\n'
+          'Do you want to continue?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _editApplication(application);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Continue', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showApplicationDetails(Map<String, dynamic> application) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Application Details'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildDetailRow('Address', application['address'] ?? 'N/A'),
+              _buildDetailRow('Phone', application['phone'] ?? 'N/A'),
+              _buildDetailRow('Status', application['status'] ?? 'N/A'),
+              _buildDetailRow('Submitted', _formatDate(DateTime.parse(application['submittedAt']))),
+              
+              if (application['description'] != null && application['description'].isNotEmpty)
+                _buildDetailRow('Description', application['description']),
+              
+              if (application['availableFrom'] != null && application['availableTo'] != null) ...[
+                _buildDetailRow('Available From', _formatDate(DateTime.parse(application['availableFrom']))),
+                _buildDetailRow('Available To', _formatDate(DateTime.parse(application['availableTo']))),
+              ],
+              
+              if (application['reviewedAt'] != null) ...[
+                const SizedBox(height: 16),
+                const Text('Review Information:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                _buildDetailRow('Reviewed At', _formatDate(DateTime.parse(application['reviewedAt']))),
+                _buildDetailRow('Reviewed By', application['reviewedBy'] ?? 'N/A'),
+              ],
+              
+              if (application['reviewComments'] != null && application['reviewComments'].isNotEmpty)
+                _buildDetailRow('Admin Comments', application['reviewComments'], isComment: true),
+              
+              // Prices
+              if (application['prices'] != null && (application['prices'] as List).isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('Pricing:', style: TextStyle(fontWeight: FontWeight.bold)),
+                ...(application['prices'] as List).map((price) => Padding(
+                  padding: const EdgeInsets.only(left: 16, top: 4),
+                  child: Text('• RM${price['amount']} ${price['unit']}'),
+                )),
+              ],
+              
+              // Images
+              if (application['imageUrls'] != null && (application['imageUrls'] as List).isNotEmpty) ...[
+                const SizedBox(height: 16),
+                const Text('Images:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: (application['imageUrls'] as List).map<Widget>((imageUrl) {
+                    return GestureDetector(
+                      onTap: () => _showFullScreenImage(imageUrl),
+                      child: Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          image: DecorationImage(
+                            image: NetworkImage(imageUrl),
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullScreenImage(String imageUrl) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Container(
+          color: Colors.black.withOpacity(0.95),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  child: Image.network(imageUrl, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                top: 40,
+                right: 20,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
               ),
             ],
           ),

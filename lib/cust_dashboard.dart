@@ -332,20 +332,15 @@ class _CustHomePageState extends State<CustHomePage> {
   }
 
   Future<List<Map<String, dynamic>>> _fetchHouses() async {
-    // Fetch all houses (no status filter)
-    final houseSnapshot = await FirebaseFirestore.instance.collection('Houses').get();
+    // Fetch only approved and available houses
+    final houseSnapshot = await FirebaseFirestore.instance.collection('ApprovedHouses')
+        .where('isAvailable', isEqualTo: true)
+        .get();
     if (houseSnapshot.docs.isEmpty) return [];
 
-    // For backward compatibility: if 'owner' field is missing or empty, fetch from AppUsers using doc.id (username)
     List<Map<String, dynamic>> houses = [];
     for (var doc in houseSnapshot.docs) {
       final data = doc.data();
-      String Name = data['owner'] ?? '';
-      if (Name.isEmpty) {
-        // Try to fetch from AppUsers using doc.id (username)
-        final ownerProfile = await FirebaseFirestore.instance.collection('AppUsers').doc(doc.id).get();
-        Name = ownerProfile.data()?['name'] ?? '';
-      }
       houses.add({
         'name': data['name'] ?? '',
         'address': data['address'] ?? '',
@@ -353,11 +348,12 @@ class _CustHomePageState extends State<CustHomePage> {
         'pricePerWeek': data['pricePerWeek'],
         'imageUrl': data['imageUrl'] ?? '',
         'imageUrls': data['imageUrls'] ?? [],
-        'owner': Name, // Use 'owner' as the key for consistency
+        'owner': data['owner'] ?? data['ownerName'] ?? '', // Use owner name from approved data
         'phone': data['phone'] ?? '',
         'prices': data['prices'] ?? [],
         'availableFrom': data['availableFrom'],
         'availableTo': data['availableTo'],
+        'description': data['description'] ?? '',
       });
     }
     return houses;
