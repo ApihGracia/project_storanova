@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // <-- Added import
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'database.dart';
+import 'notifications_page.dart';
 import 'shared_widgets.dart';
 
 class CustDashboard extends StatelessWidget {
@@ -53,21 +56,292 @@ void _showFullScreenImage(BuildContext context, String url) {
 }
 
 class _CustHomePageState extends State<CustHomePage> {
-
   int _currentIndex = 0; // Start at "Home"
   String _sortBy = 'perDay'; // 'perDay' or 'perWeek'
   late Future<List<Map<String, dynamic>>> _housesFuture;
+  final DatabaseService _db = DatabaseService();
+  List<Map<String, dynamic>> _bookings = [];
 
   @override
   void initState() {
     super.initState();
+    _checkUserBanStatus();
     _housesFuture = _fetchHouses();
+    _loadBookings();
+  }
+
+  Future<void> _checkUserBanStatus() async {
+    try {
+      final username = await _getUsernameFromFirestore();
+      if (username != null) {
+        final userDoc = await _db.getUserByUsername(username);
+        if (userDoc != null && userDoc.exists) {
+          final userData = userDoc.data() as Map<String, dynamic>;
+          final isUserBanned = userData['isBanned'] == true;
+          
+          if (isUserBanned) {
+            // Redirect to notifications page
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => NotificationsPage(expectedRole: 'customer'),
+              ),
+            );
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking ban status: $e');
+    }
+  }
+
+  Future<String?> _getUsernameFromFirestore() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    
+    // Try to get username from AppUsers by email lookup
+    final usersSnapshot = await FirebaseFirestore.instance
+        .collection('AppUsers')
+        .where('email', isEqualTo: user.email)
+        .limit(1)
+        .get();
+    
+    if (usersSnapshot.docs.isNotEmpty) {
+      return usersSnapshot.docs.first.id; // Document ID is the username
+    }
+    
+    return null;
   }
 
   void _refreshHouses() {
     setState(() {
       _housesFuture = _fetchHouses();
     });
+  }
+
+  Future<bool> _isInWishlist(Map<String, dynamic> house) async {
+    try {
+      final username = await _getUsernameFromFirestore();
+      if (username == null) return false;
+      
+      // Generate house ID from house data
+      final houseId = _generateHouseId(house);
+      return await _db.isInWishlist(username: username, houseId: houseId);
+    } catch (e) {
+      print('Error checking wishlist: $e');
+      return false;
+    }
+  }
+
+  Future<void> _toggleWishlist(Map<String, dynamic> house, bool isCurrentlyInWishlist) async {
+    try {
+      final username = await _getUsernameFromFirestore();
+      if (username == null) return;
+      
+      final houseId = _generateHouseId(house);
+      
+      if (isCurrentlyInWishlist) {
+        await _db.removeFromWishlist(username: username, houseId: houseId);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed from wishlist')),
+        );
+      } else {
+        await _db.addToWishlist(
+          username: username,
+          houseId: houseId,
+          houseName: house['name'] ?? 'Unnamed House',
+          ownerUsername: house['owner'] ?? '',
+          imageUrl: house['imageUrls'] != null && (house['imageUrls'] as List).isNotEmpty
+              ? (house['imageUrls'] as List).first
+              : house['imageUrl'],
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to wishlist')),
+        );
+      }
+      
+      // Refresh the dialog by rebuilding it
+      Navigator.of(context).pop();
+      _showHouseDetails(house);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
+
+  void _showBookingDialog(Map<String, dynamic> house) {
+    showDialog(
+      context: context,
+      builder: (context) => BookingDialog(
+        house: house,
+        onBookingComplete: () {
+          _loadBookings(); // Refresh bookings
+          Navigator.of(context).pop(); // Close house details dialog
+        },
+      ),
+    );
+  }
+
+  void _showHouseDetails(Map<String, dynamic> house) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (house['owner'] != null && house['owner'].toString().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: Text('${house['owner']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  ),
+                // --- Image slider with arrows ---
+                if (house['imageUrls'] != null && house['imageUrls'] is List && (house['imageUrls'] as List).isNotEmpty)
+                  _ImageSlider(imageUrls: List<String>.from(house['imageUrls'])),
+                // Fallback for single image (legacy)
+                if ((house['imageUrls'] == null || (house['imageUrls'] is List && (house['imageUrls'] as List).isEmpty)) && house['imageUrl'] != null && house['imageUrl'].toString().isNotEmpty)
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => _showFullScreenImage(context, house['imageUrl']),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(house['imageUrl'], width: 250, height: 180, fit: BoxFit.cover),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Text(house['name'] ?? 'Unnamed House', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                const SizedBox(height: 8),
+                if (house['owner'] != null && house['owner'].toString().isNotEmpty)
+                  Text('Owner: ${house['owner']}', style: const TextStyle(fontSize: 15, color: Colors.black87)),
+                if (house['address'] != null && house['address'].toString().isNotEmpty)
+                  Text('Address: ${house['address']}'),
+                if (house['phone'] != null && house['phone'].toString().isNotEmpty)
+                  Text('Phone: ${house['phone']}'),
+                // Show all price options if available
+                if (house['prices'] != null && house['prices'] is List && (house['prices'] as List).isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      const Text('Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...((house['prices'] as List).map<Widget>((p) {
+                        if (p is Map && p['amount'] != null && p['unit'] != null) {
+                          return Text('• RM${p['amount']} ${p['unit']}');
+                        }
+                        return const SizedBox.shrink();
+                      }).toList()),
+                    ],
+                  ),
+                // Available dates
+                if (house['availableFrom'] != null && house['availableTo'] != null)
+                  Text('Available: ${house['availableFrom'].toString().split('T')[0]} to ${house['availableTo'].toString().split('T')[0]}'),
+                const SizedBox(height: 20),
+                // Action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: FutureBuilder<bool>(
+                        future: _isInWishlist(house),
+                        builder: (context, snapshot) {
+                          final isInWishlist = snapshot.data ?? false;
+                          return ElevatedButton.icon(
+                            onPressed: () => _toggleWishlist(house, isInWishlist),
+                            icon: Icon(isInWishlist ? Icons.favorite : Icons.favorite_border),
+                            label: Text(isInWishlist ? 'Remove from Wishlist' : 'Add to Wishlist'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isInWishlist ? Colors.red.shade100 : Colors.blue.shade100,
+                              foregroundColor: isInWishlist ? Colors.red : Colors.blue,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _showBookingDialog(house),
+                        icon: const Icon(Icons.calendar_today),
+                        label: const Text('Book Now'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade100,
+                          foregroundColor: Colors.green.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _generateHouseId(Map<String, dynamic> house) {
+    // Generate a unique ID based on house data
+    final name = house['name'] ?? '';
+    final owner = house['owner'] ?? '';
+    final address = house['address'] ?? '';
+    return '${owner}_${name}_${address}'.replaceAll(' ', '_').replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '');
+  }
+
+  Color _getBookingStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return Colors.orange.shade100;
+      case 'approved':
+        return Colors.green.shade100;
+      case 'rejected':
+        return Colors.red.shade100;
+      case 'cancelled':
+        return Colors.grey.shade200;
+      default:
+        return Colors.grey.shade100;
+    }
+  }
+
+  Color _getBookingStatusTextColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return Colors.orange.shade700;
+      case 'approved':
+        return Colors.green.shade700;
+      case 'rejected':
+        return Colors.red.shade700;
+      case 'cancelled':
+        return Colors.grey.shade600;
+      default:
+        return Colors.grey.shade600;
+    }
+  }
+
+  Future<void> _loadBookings() async {
+    try {
+      final username = await _getUsernameFromFirestore();
+      if (username != null) {
+        final bookings = await _db.getUserBookings(username);
+        setState(() {
+          _bookings = bookings;
+        });
+      }
+    } catch (e) {
+      print('Error loading bookings: $e');
+    }
   }
 
   @override
@@ -80,19 +354,88 @@ class _CustHomePageState extends State<CustHomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const Text('Sort by: '),
-                DropdownButton<String>(
-                  value: _sortBy,
-                  items: const [
-                    DropdownMenuItem(value: 'perDay', child: Text('Price per Day')),
-                    DropdownMenuItem(value: 'perWeek', child: Text('Price per Week')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _sortBy = value);
+            // Show bookings at the top if any exist
+            if (_bookings.isNotEmpty) ...[
+              const Text(
+                'Your Bookings',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 120,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _bookings.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final booking = _bookings[index];
+                    return Container(
+                      width: 280,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _getBookingStatusColor(booking['status']),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            booking['houseName'] ?? 'Unnamed House',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Status: ${booking['status'].toString().toUpperCase()}',
+                            style: TextStyle(
+                              color: _getBookingStatusTextColor(booking['status']),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Check-in: ${booking['checkIn']?.toString().split('T')[0] ?? 'N/A'}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          Text(
+                            'Check-out: ${booking['checkOut']?.toString().split('T')[0] ?? 'N/A'}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          Text(
+                            'Total: RM${booking['totalPrice']?.toString() ?? '0'}',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    );
                   },
+                ),
+              ),
+              const Divider(height: 32, thickness: 2),
+            ],
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Available Houses',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                Row(
+                  children: [
+                    const Text('Sort by: '),
+                    DropdownButton<String>(
+                      value: _sortBy,
+                      items: const [
+                        DropdownMenuItem(value: 'perDay', child: Text('Price per Day')),
+                        DropdownMenuItem(value: 'perWeek', child: Text('Price per Week')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) setState(() => _sortBy = value);
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -186,78 +529,7 @@ class _CustHomePageState extends State<CustHomePage> {
                                 Text(house['address']),
                             ],
                           ),
-                          onTap: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => Dialog(
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                child: SingleChildScrollView(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        if (house['owner'] != null && house['owner'].toString().isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(bottom: 8.0),
-                                            child: Text('${house['owner']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                          ),
-                                        // --- Image slider with arrows ---
-                                        if (house['imageUrls'] != null && house['imageUrls'] is List && (house['imageUrls'] as List).isNotEmpty)
-                                          _ImageSlider(imageUrls: List<String>.from(house['imageUrls'])),
-                                        // Fallback for single image (legacy)
-                                        if ((house['imageUrls'] == null || (house['imageUrls'] is List && (house['imageUrls'] as List).isEmpty)) && house['imageUrl'] != null && house['imageUrl'].toString().isNotEmpty)
-                                          Center(
-                                            child: GestureDetector(
-                                              onTap: () => _showFullScreenImage(context, house['imageUrl']),
-                                              child: ClipRRect(
-                                                borderRadius: BorderRadius.circular(12),
-                                                child: Image.network(house['imageUrl'], width: 250, height: 180, fit: BoxFit.cover),
-                                              ),
-                                            ),
-                                          ),
-                                        const SizedBox(height: 16),
-                                        Text(house['name'] ?? 'Unnamed House', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-                                        const SizedBox(height: 8),
-                                        if (house['owner'] != null && house['owner'].toString().isNotEmpty)
-                                          Text('Owner: ${house['owner']}', style: const TextStyle(fontSize: 15, color: Colors.black87)),
-                                        if (house['address'] != null && house['address'].toString().isNotEmpty)
-                                          Text('Address: ${house['address']}'),
-                                        if (house['phone'] != null && house['phone'].toString().isNotEmpty)
-                                          Text('Phone: ${house['phone']}'),
-                                        // Show all price options if available
-                                        if (house['prices'] != null && house['prices'] is List && (house['prices'] as List).isNotEmpty)
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              const SizedBox(height: 8),
-                                              const Text('Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
-                                              ...((house['prices'] as List).map<Widget>((p) {
-                                                if (p is Map && p['amount'] != null && p['unit'] != null) {
-                                                  return Text('• RM${p['amount']} ${p['unit']}');
-                                                }
-                                                return const SizedBox.shrink();
-                                              }).toList()),
-                                            ],
-                                          ),
-                                        // Available dates
-                                        if (house['availableFrom'] != null && house['availableTo'] != null)
-                                          Text('Available: ${house['availableFrom'].toString().split('T')[0]} to ${house['availableTo'].toString().split('T')[0]}'),
-                                        const SizedBox(height: 16),
-                                        Align(
-                                          alignment: Alignment.centerRight,
-                                          child: TextButton(
-                                            onPressed: () => Navigator.of(context).pop(),
-                                            child: const Text('Close'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                          onTap: () => _showHouseDetails(house),
                         ),
                       );
                     },
@@ -411,5 +683,309 @@ class _ImageSliderState extends State<_ImageSlider> {
         ],
       ),
     );
+  }
+}
+
+// Add this widget at the bottom of the file (outside the class)
+class BookingDialog extends StatefulWidget {
+  final Map<String, dynamic> house;
+  final VoidCallback onBookingComplete;
+
+  const BookingDialog({
+    Key? key,
+    required this.house,
+    required this.onBookingComplete,
+  }) : super(key: key);
+
+  @override
+  State<BookingDialog> createState() => _BookingDialogState();
+}
+
+class _BookingDialogState extends State<BookingDialog> {
+  final _formKey = GlobalKey<FormState>();
+  DateTime? _checkInDate;
+  DateTime? _checkOutDate;
+  String? _selectedPriceOption;
+  final _specialRequestsController = TextEditingController();
+  final DatabaseService _db = DatabaseService();
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _specialRequestsController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prices = widget.house['prices'] as List? ?? [];
+    
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Book ${widget.house['name'] ?? 'House'}',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                
+                // Price selection
+                if (prices.isNotEmpty) ...[
+                  const Text('Select Price Option:', style: TextStyle(fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    hint: const Text('Choose a price option'),
+                    value: _selectedPriceOption,
+                    items: prices.map<DropdownMenuItem<String>>((price) {
+                      if (price is Map && price['amount'] != null && price['unit'] != null) {
+                        final option = 'RM${price['amount']} ${price['unit']}';
+                        return DropdownMenuItem(value: option, child: Text(option));
+                      }
+                      return const DropdownMenuItem(value: '', child: Text('Invalid price'));
+                    }).toList(),
+                    onChanged: (value) => setState(() => _selectedPriceOption = value),
+                    validator: (value) => value == null || value.isEmpty ? 'Please select a price option' : null,
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
+                // Check-in date
+                const Text('Check-in Date:', style: TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () => _selectDate(context, true),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today),
+                        const SizedBox(width: 8),
+                        Text(_checkInDate != null 
+                            ? _checkInDate!.toString().split(' ')[0]
+                            : 'Select check-in date'),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Check-out date
+                const Text('Check-out Date:', style: TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () => _selectDate(context, false),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today),
+                        const SizedBox(width: 8),
+                        Text(_checkOutDate != null 
+                            ? _checkOutDate!.toString().split(' ')[0]
+                            : 'Select check-out date'),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Total price display
+                if (_checkInDate != null && _checkOutDate != null && _selectedPriceOption != null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Booking Summary:', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text('Duration: ${_checkOutDate!.difference(_checkInDate!).inDays} days'),
+                        Text('Price: $_selectedPriceOption'),
+                        Text('Total: RM${_calculateTotal()}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
+
+                // Special requests
+                const Text('Special Requests (Optional):', style: TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _specialRequestsController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    hintText: 'Any special requests or notes...',
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _submitBooking,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: _isLoading 
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Text('Submit Booking'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectDate(BuildContext context, bool isCheckIn) async {
+    final DateTime now = DateTime.now();
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: isCheckIn 
+          ? (widget.house['availableFrom'] != null 
+              ? DateTime.tryParse(widget.house['availableFrom'].toString()) ?? now
+              : now)
+          : (_checkInDate?.add(const Duration(days: 1)) ?? now.add(const Duration(days: 1))),
+      firstDate: isCheckIn ? now : (_checkInDate ?? now),
+      lastDate: widget.house['availableTo'] != null 
+          ? DateTime.tryParse(widget.house['availableTo'].toString()) ?? now.add(const Duration(days: 365))
+          : now.add(const Duration(days: 365)),
+    );
+
+    if (picked != null) {
+      setState(() {
+        if (isCheckIn) {
+          _checkInDate = picked;
+          // Clear check-out if it's before the new check-in date
+          if (_checkOutDate != null && _checkOutDate!.isBefore(picked.add(const Duration(days: 1)))) {
+            _checkOutDate = null;
+          }
+        } else {
+          _checkOutDate = picked;
+        }
+      });
+    }
+  }
+
+  double _calculateTotal() {
+    if (_checkInDate == null || _checkOutDate == null || _selectedPriceOption == null) return 0;
+    
+    final days = _checkOutDate!.difference(_checkInDate!).inDays;
+    if (days <= 0) return 0;
+    
+    // Extract price from selected option (format: "RM123 per day/week")
+    final priceMatch = RegExp(r'RM(\d+(?:\.\d+)?)').firstMatch(_selectedPriceOption!);
+    if (priceMatch == null) return 0;
+    
+    final price = double.tryParse(priceMatch.group(1)!) ?? 0;
+    
+    if (_selectedPriceOption!.contains('per week')) {
+      final weeks = (days / 7).ceil();
+      return price * weeks;
+    } else {
+      return price * days;
+    }
+  }
+
+  Future<void> _submitBooking() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_checkInDate == null || _checkOutDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select check-in and check-out dates')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Get current user
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) throw Exception('User not logged in');
+
+      // Get username from email lookup
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('AppUsers')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
+      
+      if (usersSnapshot.docs.isEmpty) throw Exception('User not found');
+      final username = usersSnapshot.docs.first.id;
+
+      final total = _calculateTotal();
+      final days = _checkOutDate!.difference(_checkInDate!).inDays;
+      
+      await _db.createBooking(
+        customerUsername: username,
+        ownerUsername: widget.house['owner'] ?? '',
+        houseId: _generateHouseId(widget.house),
+        houseName: widget.house['name'] ?? 'Unnamed House',
+        checkIn: _checkInDate!,
+        checkOut: _checkOutDate!,
+        totalPrice: total,
+        priceBreakdown: '$_selectedPriceOption for $days days',
+        specialRequests: _specialRequestsController.text.trim().isEmpty 
+            ? null 
+            : _specialRequestsController.text.trim(),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Booking submitted successfully!')),
+      );
+
+      widget.onBookingComplete();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error submitting booking: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  String _generateHouseId(Map<String, dynamic> house) {
+    final name = house['name'] ?? '';
+    final owner = house['owner'] ?? '';
+    final address = house['address'] ?? '';
+    return '${owner}_${name}_${address}'.replaceAll(' ', '_').replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '');
   }
 }

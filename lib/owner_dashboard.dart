@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'shared_widgets.dart';
+import 'notifications_page.dart';
 
 class OwnerDashboard extends StatelessWidget {
   @override
@@ -105,7 +106,34 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   @override
   void initState() {
     super.initState();
+    _checkUserBanStatus();
     _fetchHouseApplications();
+  }
+
+  Future<void> _checkUserBanStatus() async {
+    try {
+      final username = await _getUsernameFromFirestore();
+      if (username != null) {
+        final userDoc = await _db.getUserByUsername(username);
+        if (userDoc != null && userDoc.exists) {
+          final userData = userDoc.data() as Map<String, dynamic>;
+          final isUserBanned = userData['isBanned'] == true;
+          
+          if (isUserBanned) {
+            // Redirect to notifications page
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => NotificationsPage(expectedRole: 'owner'),
+              ),
+            );
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      print('Error checking ban status: $e');
+    }
   }
 
   Future<String?> _getUsernameFromFirestore() async {

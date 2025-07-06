@@ -663,6 +663,18 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 5.0),
+          child: Text(
+            '⚠️ Note: Username cannot be changed after registration. Choose wisely!',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.orange,
+              fontWeight: FontWeight.w500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
         const SizedBox(height: 10),
         SizedBox(
           width: 300,

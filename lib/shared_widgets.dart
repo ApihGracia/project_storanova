@@ -402,8 +402,8 @@ class AdminNavBar extends StatelessWidget {
           label: 'Appeals',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.person),
-          label: 'Profile',
+          icon: Icon(Icons.bar_chart),
+          label: 'Statistics',
         ),
       ],
     );

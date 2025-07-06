@@ -141,6 +141,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  void _showNotificationDetails(Map<String, dynamic> notification) {
+    showDialog(
+      context: context,
+      builder: (context) => NotificationDetailsDialog(
+        notification: notification,
+        onMarkAsRead: _markAsRead,
+        onAppeal: _handleAppeal,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     Widget appBar;
@@ -240,11 +251,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
                           itemCount: _notifications.length,
                           itemBuilder: (context, index) {
                             final notification = _notifications[index];
-                            return NotificationCard(
-                              notification: notification,
-                              onMarkAsRead: _markAsRead,
-                              onAppeal: _handleAppeal,
-                            );
+                        return CompactNotificationCard(
+                          notification: notification,
+                          onTap: () => _showNotificationDetails(notification),
+                        );
                           },
                         ),
                 ),
@@ -368,16 +378,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 }
 
-class NotificationCard extends StatelessWidget {
+// Compact notification card for the list view
+class CompactNotificationCard extends StatelessWidget {
   final Map<String, dynamic> notification;
-  final Function(String) onMarkAsRead;
-  final Function(Map<String, dynamic>) onAppeal;
+  final VoidCallback onTap;
 
-  const NotificationCard({
+  const CompactNotificationCard({
     Key? key,
     required this.notification,
-    required this.onMarkAsRead,
-    required this.onAppeal,
+    required this.onTap,
   }) : super(key: key);
 
   @override
@@ -385,6 +394,130 @@ class NotificationCard extends StatelessWidget {
     final isRead = notification['isRead'] ?? false;
     final type = notification['type'] as String;
     final createdAt = DateTime.parse(notification['createdAt']);
+    
+    Color iconColor;
+    IconData icon;
+    
+    switch (type) {
+      case 'ban':
+        iconColor = Colors.red;
+        icon = Icons.block;
+        break;
+      case 'warning':
+        iconColor = Colors.orange;
+        icon = Icons.warning;
+        break;
+      case 'appeal':
+        iconColor = Colors.blue;
+        icon = Icons.gavel;
+        break;
+      default:
+        iconColor = Colors.blue;
+        icon = Icons.info;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(
+          icon, 
+          color: isRead ? Colors.grey : iconColor,
+          size: 24,
+        ),
+        title: Text(
+          notification['title'] ?? 'Notification',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+            color: isRead ? Colors.grey : Colors.black,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              notification['message'] ?? '',
+              style: TextStyle(
+                fontSize: 12,
+                color: isRead ? Colors.grey : Colors.black87,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _formatDateCompact(createdAt),
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isRead)
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            const SizedBox(width: 8),
+            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+          ],
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  String _formatDateCompact(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+    
+    if (difference.inDays > 0) {
+      return '${difference.inDays}d ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}h ago';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}m ago';
+    } else {
+      return 'Just now';
+    }
+  }
+}
+
+// Full notification details dialog
+class NotificationDetailsDialog extends StatefulWidget {
+  final Map<String, dynamic> notification;
+  final Function(String) onMarkAsRead;
+  final Function(Map<String, dynamic>) onAppeal;
+
+  const NotificationDetailsDialog({
+    Key? key,
+    required this.notification,
+    required this.onMarkAsRead,
+    required this.onAppeal,
+  }) : super(key: key);
+
+  @override
+  _NotificationDetailsDialogState createState() => _NotificationDetailsDialogState();
+}
+
+class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
+  bool _isAppealInProgress = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isRead = widget.notification['isRead'] ?? false;
+    final type = widget.notification['type'] as String;
+    final createdAt = DateTime.parse(widget.notification['createdAt']);
     
     Color backgroundColor;
     Color borderColor;
@@ -412,37 +545,42 @@ class NotificationCard extends StatelessWidget {
         icon = Icons.info;
     }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        decoration: BoxDecoration(
-          color: isRead ? Colors.grey.withOpacity(0.1) : backgroundColor,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isRead ? Colors.grey : borderColor),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: backgroundColor,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(16),
+                  topRight: Radius.circular(16),
+                ),
+                border: Border.all(color: borderColor),
+              ),
+              child: Row(
                 children: [
-                  Icon(icon, color: isRead ? Colors.grey : borderColor),
-                  const SizedBox(width: 8),
+                  Icon(icon, color: borderColor, size: 28),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      notification['title'] ?? 'Notification',
-                      style: TextStyle(
-                        fontSize: 16,
+                      widget.notification['title'] ?? 'Notification',
+                      style: const TextStyle(
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: isRead ? Colors.grey : Colors.black,
                       ),
                     ),
                   ),
                   if (!isRead)
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 12,
+                      height: 12,
                       decoration: const BoxDecoration(
                         color: Colors.red,
                         shape: BoxShape.circle,
@@ -450,48 +588,163 @@ class NotificationCard extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                notification['message'] ?? '',
-                style: TextStyle(
-                  color: isRead ? Colors.grey : Colors.black87,
+            ),
+            
+            // Content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.notification['message'] ?? '',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Received: ${_formatDate(createdAt)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    if (type == 'ban') ...[
+                      const SizedBox(height: 20),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.info, color: Colors.orange, size: 20),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Appeal Information',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            FutureBuilder<bool>(
+                              future: _checkExistingAppeal(),
+                              builder: (context, snapshot) {
+                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                  return const Text('Checking appeal status...');
+                                }
+                                
+                                final hasAppeal = snapshot.data ?? false;
+                                
+                                if (hasAppeal) {
+                                  return const Text(
+                                    'You have already submitted an appeal for this ban. Please wait for admin review.',
+                                    style: TextStyle(color: Colors.blue),
+                                  );
+                                } else {
+                                  return const Text(
+                                    'You can submit an appeal if you believe this ban was issued in error.',
+                                    style: TextStyle(color: Colors.orange),
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ),
+            
+            // Actions
+            Container(
+              padding: const EdgeInsets.all(20),
+              child: Row(
                 children: [
-                  Text(
-                    _formatDate(createdAt),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
+                  if (!isRead)
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          widget.onMarkAsRead(widget.notification['id']);
+                          Navigator.of(context).pop();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[600],
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Mark as Read'),
+                      ),
                     ),
-                  ),
-                  Row(
-                    children: [
-                      if (type == 'ban' && !isRead)
-                        TextButton(
-                          onPressed: () => onAppeal(notification),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.orange,
-                          ),
-                          child: const Text('Appeal'),
-                        ),
-                      if (!isRead)
-                        TextButton(
-                          onPressed: () => onMarkAsRead(notification['id']),
-                          child: const Text('Mark as Read'),
-                        ),
-                    ],
-                  ),
+                  if (!isRead && type == 'ban') const SizedBox(width: 12),
+                  if (type == 'ban')
+                    Expanded(
+                      child: FutureBuilder<bool>(
+                        future: _checkExistingAppeal(),
+                        builder: (context, snapshot) {
+                          final hasAppeal = snapshot.data ?? false;
+                          
+                          return ElevatedButton(
+                            onPressed: hasAppeal || _isAppealInProgress ? null : () {
+                              setState(() => _isAppealInProgress = true);
+                              widget.onAppeal(widget.notification);
+                              Navigator.of(context).pop();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: hasAppeal ? Colors.grey : Colors.orange,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text(hasAppeal ? 'Appeal Submitted' : 'Submit Appeal'),
+                          );
+                        },
+                      ),
+                    ),
+                  if (isRead || type != 'ban') ...[
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close'),
+                    ),
+                  ],
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  Future<bool> _checkExistingAppeal() async {
+    try {
+      final db = DatabaseService();
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      
+      // Get username from email
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('AppUsers')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
+          .get();
+      
+      if (usersSnapshot.docs.isEmpty) return false;
+      
+      final username = usersSnapshot.docs.first.id;
+      
+      // Check for pending appeals
+      final existingAppeals = await db.getAllAppeals(status: 'pending');
+      return existingAppeals.any((appeal) => appeal['username'] == username);
+    } catch (e) {
+      return false;
+    }
   }
 
   String _formatDate(DateTime date) {

@@ -299,6 +299,22 @@ class DatabaseService {
     return null;
   }
 
+  // READ: Get approved house by owner username
+  Future<Map<String, dynamic>?> getApprovedHouseByOwner(String ownerUsername) async {
+    try {
+      final doc = await approvedHousesCollection.doc(ownerUsername).get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        return data;
+      }
+      return null;
+    } catch (e) {
+      print('Error getting approved house: $e');
+      return null;
+    }
+  }
+
   // UPDATE: Toggle house availability status
   Future<void> updateHouseStatus({
     required String ownerUsername,
@@ -378,6 +394,17 @@ class DatabaseService {
     final houseDoc = await approvedHousesCollection.doc(ownerUsername).get();
     if (houseDoc.exists) {
       await approvedHousesCollection.doc(ownerUsername).update({
+        'isHouseBanned': isHouseBanned,
+        'houseBanReason': houseBanReason,
+        'houseBannedBy': bannedBy,
+        'houseBanDate': isHouseBanned ? DateTime.now().toIso8601String() : null,
+      });
+    }
+    
+    // Also update the user's house ban status in AppUsers collection
+    final userDoc = await usersCollection.doc(ownerUsername).get();
+    if (userDoc.exists) {
+      await usersCollection.doc(ownerUsername).update({
         'isHouseBanned': isHouseBanned,
         'houseBanReason': houseBanReason,
         'houseBannedBy': bannedBy,
@@ -578,5 +605,221 @@ class DatabaseService {
         .collection('Notifications')
         .doc(notificationId)
         .update({'isRead': true});
+  }
+
+  // WISHLIST METHODS
+  
+  // Add house to user's wishlist
+  Future<void> addToWishlist({
+    required String username,
+    required String houseId,
+    required String houseName,
+    required String ownerUsername,
+    String? imageUrl,
+  }) async {
+    final wishlistDoc = '${username}_${houseId}';
+    await FirebaseFirestore.instance.collection('Wishlists').doc(wishlistDoc).set({
+      'username': username,
+      'houseId': houseId,
+      'houseName': houseName,
+      'ownerUsername': ownerUsername,
+      'imageUrl': imageUrl,
+      'addedAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  // Remove house from user's wishlist
+  Future<void> removeFromWishlist({
+    required String username,
+    required String houseId,
+  }) async {
+    final wishlistDoc = '${username}_${houseId}';
+    await FirebaseFirestore.instance.collection('Wishlists').doc(wishlistDoc).delete();
+  }
+
+  // Check if house is in user's wishlist
+  Future<bool> isInWishlist({
+    required String username,
+    required String houseId,
+  }) async {
+    final wishlistDoc = '${username}_${houseId}';
+    final doc = await FirebaseFirestore.instance.collection('Wishlists').doc(wishlistDoc).get();
+    return doc.exists;
+  }
+
+  // Get user's wishlist
+  Future<List<Map<String, dynamic>>> getUserWishlist(String username) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Wishlists')
+        .where('username', isEqualTo: username)
+        .orderBy('addedAt', descending: true)
+        .get();
+
+    List<Map<String, dynamic>> wishlistItems = [];
+    for (var doc in snapshot.docs) {
+      final data = doc.data();
+      
+      // Get house details from ApprovedHouses
+      final houseDoc = await approvedHousesCollection.doc(data['houseId']).get();
+      if (houseDoc.exists) {
+        final houseData = houseDoc.data() as Map<String, dynamic>;
+        
+        // Only include if house is still available and not banned
+        if (houseData['isAvailable'] == true && (houseData['isHouseBanned'] ?? false) == false) {
+          wishlistItems.add({
+            'id': doc.id,
+            'houseId': data['houseId'],
+            'houseName': data['houseName'],
+            'ownerUsername': data['ownerUsername'],
+            'addedAt': data['addedAt'],
+            'houseData': houseData,
+          });
+        }
+      }
+    }
+    return wishlistItems;
+  }
+
+  // BOOKING METHODS
+
+  // Create a booking
+  Future<String> createBooking({
+    required String customerUsername,
+    required String ownerUsername,
+    required String houseId,
+    required String houseName,
+    required DateTime checkIn,
+    required DateTime checkOut,
+    required double totalPrice,
+    required String priceBreakdown,
+    String? specialRequests,
+  }) async {
+    // Generate booking ID
+    final bookingSnapshot = await FirebaseFirestore.instance
+        .collection('Bookings')
+        .where('customerUsername', isEqualTo: customerUsername)
+        .get();
+    
+    final nextIndex = bookingSnapshot.docs.length + 1;
+    final bookingId = 'booking_${customerUsername}_$nextIndex';
+
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).set({
+      'customerUsername': customerUsername,
+      'ownerUsername': ownerUsername,
+      'houseId': houseId,
+      'houseName': houseName,
+      'checkIn': checkIn.toIso8601String(),
+      'checkOut': checkOut.toIso8601String(),
+      'totalPrice': totalPrice,
+      'priceBreakdown': priceBreakdown,
+      'specialRequests': specialRequests,
+      'status': 'pending', // pending, approved, rejected, cancelled
+      'createdAt': DateTime.now().toIso8601String(),
+      'reviewedAt': null,
+      'reviewedBy': null,
+      'reviewComments': null,
+    });
+
+    // Send notification to customer
+    await addNotification(
+      username: customerUsername,
+      title: 'Booking Submitted',
+      message: 'Your booking for $houseName has been submitted and is waiting for owner review.',
+      type: 'booking',
+      relatedDocumentId: bookingId,
+    );
+
+    // Send notification to owner
+    await addNotification(
+      username: ownerUsername,
+      title: 'New Booking Request',
+      message: 'You have a new booking request for $houseName from $customerUsername.',
+      type: 'booking',
+      relatedDocumentId: bookingId,
+    );
+
+    return bookingId;
+  }
+
+  // Get user's bookings
+  Future<List<Map<String, dynamic>>> getUserBookings(String username) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Bookings')
+        .where('customerUsername', isEqualTo: username)
+        .orderBy('createdAt', descending: true)
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return data;
+    }).toList();
+  }
+
+  // Get owner's booking requests
+  Future<List<Map<String, dynamic>>> getOwnerBookingRequests(String ownerUsername) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Bookings')
+        .where('ownerUsername', isEqualTo: ownerUsername)
+        .orderBy('createdAt', descending: true)
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return data;
+    }).toList();
+  }
+
+  // Update booking status
+  Future<void> updateBookingStatus({
+    required String bookingId,
+    required String status,
+    required String reviewedBy,
+    String? reviewComments,
+  }) async {
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+      'status': status,
+      'reviewedAt': DateTime.now().toIso8601String(),
+      'reviewedBy': reviewedBy,
+      'reviewComments': reviewComments,
+    });
+
+    // Get booking details for notification
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (bookingDoc.exists) {
+      final bookingData = bookingDoc.data() as Map<String, dynamic>;
+      final customerUsername = bookingData['customerUsername'];
+      final houseName = bookingData['houseName'];
+
+      // Send notification to customer
+      String title = '';
+      String message = '';
+      
+      switch (status) {
+        case 'approved':
+          title = 'Booking Approved';
+          message = 'Your booking for $houseName has been approved by the owner.';
+          break;
+        case 'rejected':
+          title = 'Booking Rejected';
+          message = 'Your booking for $houseName has been rejected. ${reviewComments != null ? "Reason: $reviewComments" : ""}';
+          break;
+        case 'cancelled':
+          title = 'Booking Cancelled';
+          message = 'Your booking for $houseName has been cancelled.';
+          break;
+      }
+
+      if (title.isNotEmpty) {
+        await addNotification(
+          username: customerUsername,
+          title: title,
+          message: message,
+          type: 'booking',
+          relatedDocumentId: bookingId,
+        );
+      }
+    }
   }
 }
