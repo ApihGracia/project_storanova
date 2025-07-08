@@ -124,6 +124,11 @@ class DatabaseService {
     List<String> imageUrls = const [],
     String? description,
     String? proofOfOwnershipUrl, // Added proof of ownership
+    Map<String, bool>? paymentMethods, // New field
+    String? maxItemQuantity, // New field
+    String? pricePerItem, // New field
+    bool offerPickupService = false, // New field
+    String? pickupServiceCost, // New field
   }) async {
     // Get owner details
     final ownerDoc = await usersCollection.doc(ownerUsername).get();
@@ -147,6 +152,11 @@ class DatabaseService {
       'imageUrls': imageUrls,
       'description': description ?? '',
       'proofOfOwnershipUrl': proofOfOwnershipUrl, // Added proof of ownership
+      'paymentMethods': paymentMethods ?? {}, // New field
+      'maxItemQuantity': maxItemQuantity, // New field
+      'pricePerItem': pricePerItem, // New field
+      'offerPickupService': offerPickupService, // New field
+      'pickupServiceCost': pickupServiceCost, // New field
       'status': 'pending', // pending, approved, rejected
       'submittedAt': DateTime.now().toIso8601String(),
       'reviewedAt': null,
@@ -230,6 +240,12 @@ class DatabaseService {
           'approvedBy': reviewedBy,
           'isAvailable': true, // Default to available when first approved
           'statusUpdatedAt': DateTime.now().toIso8601String(),
+          // New fields from the updated application form
+          'paymentMethods': data['paymentMethods'] ?? {},
+          'maxItemQuantity': data['maxItemQuantity'],
+          'pricePerItem': data['pricePerItem'],
+          'offerPickupService': data['offerPickupService'] ?? false,
+          'pickupServiceCost': data['pickupServiceCost'],
         });
       }
     }
@@ -246,6 +262,11 @@ class DatabaseService {
     List<String> imageUrls = const [],
     String? description,
     String? proofOfOwnershipUrl, // Added proof of ownership
+    Map<String, bool>? paymentMethods, // New field
+    String? maxItemQuantity, // New field
+    String? pricePerItem, // New field
+    bool offerPickupService = false, // New field
+    String? pickupServiceCost, // New field
   }) async {
     final updateData = {
       'address': address,
@@ -256,6 +277,11 @@ class DatabaseService {
       'imageUrls': imageUrls,
       'description': description ?? '',
       'proofOfOwnershipUrl': proofOfOwnershipUrl, // Added proof of ownership
+      'paymentMethods': paymentMethods ?? {}, // New field
+      'maxItemQuantity': maxItemQuantity, // New field
+      'pricePerItem': pricePerItem, // New field
+      'offerPickupService': offerPickupService, // New field
+      'pickupServiceCost': pickupServiceCost, // New field
       'status': 'pending', // Reset to pending when updated
       'submittedAt': DateTime.now().toIso8601String(), // Update submission time
       'reviewedAt': null, // Clear previous review

@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'shared_widgets.dart';
 import 'database.dart';
+import 'booking_dialog.dart';
 
 class CustWishlistPage extends StatefulWidget {
   const CustWishlistPage({Key? key}) : super(key: key);
@@ -14,6 +15,7 @@ class CustWishlistPage extends StatefulWidget {
 class _CustWishlistPageState extends State<CustWishlistPage> {
   final DatabaseService _db = DatabaseService();
   late Future<List<Map<String, dynamic>>> _wishlistFuture;
+  bool _isIndexBuilding = false;
 
   @override
   void initState() {
@@ -25,9 +27,23 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
     try {
       final username = await _getUsernameFromFirestore();
       if (username == null) return [];
-      return await _db.getUserWishlist(username);
+      final result = await _db.getUserWishlist(username);
+      setState(() {
+        _isIndexBuilding = false;
+      });
+      return result;
     } catch (e) {
       print('Error loading wishlist: $e');
+      // If index is building, show empty list for now
+      if (e.toString().contains('index is currently building')) {
+        setState(() {
+          _isIndexBuilding = true;
+        });
+        return [];
+      }
+      setState(() {
+        _isIndexBuilding = false;
+      });
       return [];
     }
   }
@@ -85,37 +101,24 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Owner name
-                if (wishlistItem['ownerUsername'] != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Text(
-                      wishlistItem['ownerUsername'],
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                    ),
-                  ),
-                
-                // House image
+                // House image(s) - using image slider for multiple images
                 if (houseData['imageUrls'] != null && 
                     houseData['imageUrls'] is List && 
                     (houseData['imageUrls'] as List).isNotEmpty)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      (houseData['imageUrls'] as List).first,
-                      width: double.infinity,
-                      height: 200,
-                      fit: BoxFit.cover,
-                    ),
-                  )
+                  _ImageSlider(imageUrls: List<String>.from(houseData['imageUrls']))
                 else if (houseData['imageUrl'] != null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      houseData['imageUrl'],
-                      width: double.infinity,
-                      height: 200,
-                      fit: BoxFit.cover,
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => _showImageFullScreen(houseData['imageUrl']),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          houseData['imageUrl'],
+                          width: 250,
+                          height: 180,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
                   ),
                 
@@ -129,13 +132,25 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                 const SizedBox(height: 8),
                 
                 // House details
-                if (houseData['address'] != null)
-                  Text('Address: ${houseData['address']}'),
+                if (houseData['owner'] != null && houseData['owner'].toString().isNotEmpty)
+                  Text('Owner: ${houseData['owner']}', style: const TextStyle(fontSize: 15, color: Colors.black87)),
                 if (houseData['phone'] != null)
                   Text('Phone: ${houseData['phone']}'),
                 
-                // Prices
-                if (houseData['prices'] != null && 
+                // Pricing information - prioritize new structure
+                if (houseData['pricePerItem'] != null && houseData['pricePerItem'].toString().isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      Text('Price per Item: RM${houseData['pricePerItem']}', 
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                      if (houseData['maxItemQuantity'] != null && houseData['maxItemQuantity'].toString().isNotEmpty)
+                        Text('Max Items: ${houseData['maxItemQuantity']}'),
+                    ],
+                  )
+                // Fallback to legacy pricing structure
+                else if (houseData['prices'] != null && 
                     houseData['prices'] is List && 
                     (houseData['prices'] as List).isNotEmpty)
                   Column(
@@ -149,6 +164,16 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                         }
                         return const SizedBox.shrink();
                       }).toList()),
+                    ],
+                  ),
+                // Show pickup service if offered
+                if (houseData['offerPickupService'] == true && houseData['pickupServiceCost'] != null)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 8),
+                      Text('Pickup Service Available: RM${houseData['pickupServiceCost']}', 
+                        style: const TextStyle(color: Colors.blue)),
                     ],
                   ),
                 
@@ -177,6 +202,21 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          _showBookingDialog(wishlistItem, houseData);
+                        },
+                        icon: const Icon(Icons.calendar_today),
+                        label: const Text('Book Now'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade100,
+                          foregroundColor: Colors.green.shade700,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -190,6 +230,64 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showBookingDialog(Map<String, dynamic> wishlistItem, Map<String, dynamic> houseData) {
+    // Create a house object compatible with BookingDialog
+    final house = {
+      'id': wishlistItem['houseId'],
+      'name': wishlistItem['houseName'],
+      'owner': houseData['owner'] ?? houseData['ownerName'] ?? wishlistItem['ownerUsername'] ?? '',
+      'ownerUsername': wishlistItem['ownerUsername'],
+      'address': houseData['address'] ?? '',
+      'phone': houseData['phone'] ?? '',
+      'prices': houseData['prices'] ?? [],
+      'availableFrom': houseData['availableFrom'],
+      'availableTo': houseData['availableTo'],
+      'imageUrls': houseData['imageUrls'] ?? [],
+      'imageUrl': houseData['imageUrl'] ?? '',
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => BookingDialog(
+        house: house,
+        onBookingComplete: () {
+          // Refresh wishlist after booking
+          _refreshWishlist();
+        },
+      ),
+    );
+  }
+
+  void _showImageFullScreen(String url) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Container(
+          color: Colors.black.withOpacity(0.95),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                top: 40,
+                right: 20,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -229,6 +327,28 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
           final wishlistItems = snapshot.data ?? [];
           
           if (wishlistItems.isEmpty) {
+            if (_isIndexBuilding) {
+              return const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      'Setting up your wishlist...',
+                      style: TextStyle(fontSize: 18, color: Colors.grey),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Database indexes are building. This will take a few minutes.',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+            
             return const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -270,51 +390,103 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                       return Card(
                         elevation: 2,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        child: ListTile(
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: houseData['imageUrls'] != null && 
-                                   houseData['imageUrls'] is List && 
-                                   (houseData['imageUrls'] as List).isNotEmpty
-                                ? Image.network(
-                                    (houseData['imageUrls'] as List).first,
-                                    width: 60,
-                                    height: 60,
-                                    fit: BoxFit.cover,
-                                  )
-                                : houseData['imageUrl'] != null
-                                    ? Image.network(
-                                        houseData['imageUrl'],
-                                        width: 60,
-                                        height: 60,
-                                        fit: BoxFit.cover,
-                                      )
-                                    : const Icon(Icons.home, size: 40, color: Colors.blue),
-                          ),
-                          title: Text(
-                            item['houseName'] ?? 'Unnamed House',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (item['ownerUsername'] != null)
-                                Text('Owner: ${item['ownerUsername']}'),
-                              if (houseData['address'] != null)
-                                Text(houseData['address']),
-                              if (houseData['prices'] != null && 
-                                  houseData['prices'] is List && 
-                                  (houseData['prices'] as List).isNotEmpty)
-                                Text(
-                                  'From RM${(houseData['prices'] as List).map((p) => p['amount'] is num ? p['amount'] : double.tryParse(p['amount'].toString()) ?? double.infinity).reduce((a, b) => a < b ? a : b)}',
-                                ),
-                            ],
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.favorite, color: Colors.red),
-                            onPressed: () => _removeFromWishlist(item['houseId']),
-                          ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
                           onTap: () => _showHouseDetails(item),
+                          child: SizedBox(
+                            height: 100, // Fixed height for consistent rows
+                            child: Row(
+                              children: [
+                                // Image section - fills the left side completely
+                                Container(
+                                  width: 100, // Square dimensions
+                                  height: 100,
+                                  child: houseData['imageUrls'] != null && 
+                                         houseData['imageUrls'] is List && 
+                                         (houseData['imageUrls'] as List).isNotEmpty
+                                      ? Image.network(
+                                          (houseData['imageUrls'] as List).first,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Container(
+                                            color: Colors.grey.shade200,
+                                            child: const Icon(Icons.home, size: 40, color: Colors.blue),
+                                          ),
+                                        )
+                                      : houseData['imageUrl'] != null
+                                          ? Image.network(
+                                              houseData['imageUrl'],
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) => Container(
+                                                color: Colors.grey.shade200,
+                                                child: const Icon(Icons.home, size: 40, color: Colors.blue),
+                                              ),
+                                            )
+                                          : Container(
+                                              color: Colors.grey.shade200,
+                                              child: const Icon(Icons.home, size: 40, color: Colors.blue),
+                                            ),
+                                ),
+                                // Content section - takes remaining space
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          houseData['address'] ?? item['houseName'] ?? 'Unnamed House',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        if (houseData['owner'] != null && houseData['owner'].toString().isNotEmpty)
+                                          Text(
+                                            'Owner: ${houseData['owner']}',
+                                            style: const TextStyle(fontSize: 12, color: Colors.black54),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        const SizedBox(height: 1),
+                                        // Show new pricing structure if available, fallback to old structure
+                                        if (houseData['pricePerItem'] != null && houseData['pricePerItem'].toString().isNotEmpty)
+                                          Text(
+                                            'RM${houseData['pricePerItem']} per item',
+                                            style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600),
+                                          )
+                                        else if (houseData['prices'] != null && 
+                                            houseData['prices'] is List && 
+                                            (houseData['prices'] as List).isNotEmpty)
+                                          Text(
+                                            'From RM${(houseData['prices'] as List).map((p) => p['amount'] is num ? p['amount'] : double.tryParse(p['amount'].toString()) ?? double.infinity).reduce((a, b) => a < b ? a : b)}',
+                                            style: const TextStyle(fontSize: 13, color: Colors.green, fontWeight: FontWeight.w600),
+                                          ),
+                                        const SizedBox(height: 1),
+                                        if (houseData['availableFrom'] != null && houseData['availableTo'] != null)
+                                          Text(
+                                            'Available: ${houseData['availableFrom'].toString().split('T')[0]} to ${houseData['availableTo'].toString().split('T')[0]}',
+                                            style: const TextStyle(fontSize: 11, color: Colors.green),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                // Remove from wishlist button
+                                Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: IconButton(
+                                    icon: const Icon(Icons.favorite, color: Colors.red),
+                                    onPressed: () => _removeFromWishlist(item['houseId']),
+                                    tooltip: 'Remove from wishlist',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -330,6 +502,134 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
         onTap: (index) {
           // Navigation is handled by the shared widget
         },
+      ),
+    );
+  }
+}
+
+// Image Slider Widget for multiple images
+class _ImageSlider extends StatefulWidget {
+  final List<String> imageUrls;
+  const _ImageSlider({required this.imageUrls});
+
+  @override
+  State<_ImageSlider> createState() => _ImageSliderState();
+}
+
+class _ImageSliderState extends State<_ImageSlider> {
+  int _currentPage = 0;
+  late final PageController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _goTo(int page) {
+    if (page >= 0 && page < widget.imageUrls.length) {
+      _controller.animateToPage(page, duration: const Duration(milliseconds: 250), curve: Curves.easeInOut);
+      setState(() => _currentPage = page);
+    }
+  }
+
+  void _showFullScreenImage(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        child: Container(
+          color: Colors.black.withOpacity(0.95),
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                top: 40,
+                right: 20,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 200,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: widget.imageUrls.length,
+            onPageChanged: (i) => setState(() => _currentPage = i),
+            itemBuilder: (context, idx) {
+              final url = widget.imageUrls[idx];
+              return GestureDetector(
+                onTap: () => _showFullScreenImage(context, url),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(url, width: 250, height: 180, fit: BoxFit.cover),
+                  ),
+                ),
+              );
+            },
+          ),
+          if (widget.imageUrls.length > 1)
+            Positioned(
+              left: 0,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 28),
+                onPressed: _currentPage > 0 ? () => _goTo(_currentPage - 1) : null,
+              ),
+            ),
+          if (widget.imageUrls.length > 1)
+            Positioned(
+              right: 0,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_forward_ios, color: Colors.white, size: 28),
+                onPressed: _currentPage < widget.imageUrls.length - 1 ? () => _goTo(_currentPage + 1) : null,
+              ),
+            ),
+          if (widget.imageUrls.length > 1)
+            Positioned(
+              bottom: 8,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.imageUrls.length,
+                  (i) => Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i == _currentPage ? Colors.blue : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

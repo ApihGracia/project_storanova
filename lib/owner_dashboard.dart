@@ -79,8 +79,22 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
   final TextEditingController _houseAddressController = TextEditingController();
   final TextEditingController _housePhoneController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  List<Map<String, dynamic>> _prices = [];
-  String _priceUnit = 'per day';
+  
+  // New form fields for the updated requirements
+  final TextEditingController _maxItemQuantityController = TextEditingController();
+  final TextEditingController _pricePerItemController = TextEditingController();
+  final TextEditingController _pickupServiceCostController = TextEditingController();
+  
+  // Payment methods - multiple selection allowed
+  Map<String, bool> _paymentMethods = {
+    'cash': false,
+    'online_banking': false,
+    'ewallet': false,
+  };
+  
+  // Pickup service
+  bool _offerPickupService = false;
+  
   DateTime? _availableFrom;
   DateTime? _availableTo;
   final DatabaseService _db = DatabaseService();
@@ -170,24 +184,34 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
       if (house != null) {
         _houseAddressController.text = house.address;
         _housePhoneController.text = house.phone;
-        _prices = List<Map<String, dynamic>>.from(house.prices);
-        _priceUnit = house.prices.isNotEmpty ? house.prices[0]['unit'] : 'per day';
         _availableFrom = house.availableFrom;
         _availableTo = house.availableTo;
         _formImages = List<dynamic>.from(house.imageUrls); // Always dynamic
         _proofOfOwnership = null; // Reset proof for editing
         _proofOfOwnershipType = null;
+        
+        // Reset new fields for editing - will be set from existing data if available
+        _maxItemQuantityController.text = '';
+        _pricePerItemController.text = '';
+        _pickupServiceCostController.text = '';
+        _paymentMethods = {'cash': false, 'online_banking': false, 'ewallet': false};
+        _offerPickupService = false;
       } else {
         _houseAddressController.text = '';
         _housePhoneController.text = '';
         _descriptionController.text = '';
-        _prices = [];
-        _priceUnit = 'per day';
         _availableFrom = null;
         _availableTo = null;
         _formImages = [];
         _proofOfOwnership = null;
         _proofOfOwnershipType = null;
+        
+        // Reset new fields
+        _maxItemQuantityController.text = '';
+        _pricePerItemController.text = '';
+        _pickupServiceCostController.text = '';
+        _paymentMethods = {'cash': false, 'online_banking': false, 'ewallet': false};
+        _offerPickupService = false;
       }
     });
   }
@@ -212,11 +236,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     });
   }
 
-  void _addPriceField() {
-    setState(() {
-      _prices.add({'amount': '', 'unit': _priceUnit});
-    });
-  }
+
 
   Future<void> _pickHouseImage() async {
     if (_formImages.length >= 3) return;
@@ -292,6 +312,16 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
       );
       return;
     }
+    
+    // Validate that at least one payment method is selected
+    bool hasPaymentMethod = _paymentMethods.values.any((selected) => selected);
+    if (!hasPaymentMethod) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one payment method.')),
+      );
+      return;
+    }
+    
     final username = await _getUsernameFromFirestore();
     if (username == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -332,12 +362,17 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           applicationId: _editingApplicationId!,
           address: _houseAddressController.text.trim(),
           phone: _housePhoneController.text.trim(),
-          prices: _prices,
+          prices: [], // Empty since we're using new pricing structure
           availableFrom: _availableFrom!,
           availableTo: _availableTo!,
           imageUrls: uploadedUrls,
           description: _descriptionController.text.trim(),
           proofOfOwnershipUrl: proofUrl,
+          paymentMethods: _paymentMethods,
+          maxItemQuantity: _maxItemQuantityController.text.trim(),
+          pricePerItem: _pricePerItemController.text.trim(),
+          offerPickupService: _offerPickupService,
+          pickupServiceCost: _offerPickupService ? _pickupServiceCostController.text.trim() : null,
         );
       } else {
         // Check if owner already has an application
@@ -355,12 +390,17 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
           ownerUsername: username,
           address: _houseAddressController.text.trim(),
           phone: _housePhoneController.text.trim(),
-          prices: _prices,
+          prices: [], // Empty since we're using new pricing structure
           availableFrom: _availableFrom!,
           availableTo: _availableTo!,
           imageUrls: uploadedUrls,
           description: _descriptionController.text.trim(),
           proofOfOwnershipUrl: proofUrl,
+          paymentMethods: _paymentMethods,
+          maxItemQuantity: _maxItemQuantityController.text.trim(),
+          pricePerItem: _pricePerItemController.text.trim(),
+          offerPickupService: _offerPickupService,
+          pickupServiceCost: _offerPickupService ? _pickupServiceCostController.text.trim() : null,
         );
       }
       setState(() { 
@@ -369,6 +409,13 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
         _proofOfOwnership = null;
         _proofOfOwnershipType = null;
         _editingApplicationId = null; // Clear editing state
+        
+        // Reset new form fields
+        _maxItemQuantityController.clear();
+        _pricePerItemController.clear();
+        _pickupServiceCostController.clear();
+        _paymentMethods = {'cash': false, 'online_banking': false, 'ewallet': false};
+        _offerPickupService = false;
       });
       await _fetchHouseApplications();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -479,13 +526,16 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     _houseAddressController.dispose();
     _housePhoneController.dispose();
     _descriptionController.dispose();
+    _maxItemQuantityController.dispose();
+    _pricePerItemController.dispose();
+    _pickupServiceCostController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: OwnerAppBar(title: 'StoraNova(owner)'),
+      appBar: OwnerAppBar(title: 'StoraNova'),
       endDrawer: OwnerDrawer(),
       body: _isLoading
           ? const Center(
@@ -785,43 +835,113 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                 ],
               ),
               const SizedBox(height: 8),
-              ..._prices.asMap().entries.map((entry) {
-                int idx = entry.key;
-                return Row(
+              // Payment methods section
+              const Text('Payment Methods:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: TextFormField(
-                        initialValue: entry.value['amount'],
-                        decoration: const InputDecoration(labelText: 'Price (RM)'),
-                        keyboardType: TextInputType.number,
-                        onChanged: (val) => _prices[idx]['amount'] = val,
-                        validator: (v) => v == null || v.isEmpty ? 'Required' : null,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    DropdownButton<String>(
-                      value: entry.value['unit'],
-                      items: const [
-                        DropdownMenuItem(value: 'per day', child: Text('per day')),
-                        DropdownMenuItem(value: 'per week', child: Text('per week')),
-                      ],
-                      onChanged: (val) {
-                        setState(() { _prices[idx]['unit'] = val ?? 'per day'; });
+                    const Text('Select payment methods you accept (can select multiple):', 
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      title: const Text('Cash'),
+                      value: _paymentMethods['cash'],
+                      onChanged: (value) {
+                        setState(() {
+                          _paymentMethods['cash'] = value ?? false;
+                        });
                       },
+                      dense: true,
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () {
-                        setState(() { _prices.removeAt(idx); });
+                    CheckboxListTile(
+                      title: const Text('Online Banking'),
+                      value: _paymentMethods['online_banking'],
+                      onChanged: (value) {
+                        setState(() {
+                          _paymentMethods['online_banking'] = value ?? false;
+                        });
                       },
+                      dense: true,
+                    ),
+                    CheckboxListTile(
+                      title: const Text('E-Wallet'),
+                      value: _paymentMethods['ewallet'],
+                      onChanged: (value) {
+                        setState(() {
+                          _paymentMethods['ewallet'] = value ?? false;
+                        });
+                      },
+                      dense: true,
                     ),
                   ],
-                );
-              }),
-              const SizedBox(height: 8),
-              ElevatedButton(
-                onPressed: _addPriceField,
-                child: const Text('Add Price Option'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Max item quantity and price per item
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _maxItemQuantityController,
+                      decoration: const InputDecoration(labelText: 'Max Items Quantity'),
+                      keyboardType: TextInputType.number,
+                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _pricePerItemController,
+                      decoration: const InputDecoration(labelText: 'Price per Item (RM)'),
+                      keyboardType: TextInputType.number,
+                      validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Pickup service section
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CheckboxListTile(
+                      title: const Text('Offer Pickup Service'),
+                      subtitle: const Text('Check this if you want to offer pickup service to customers'),
+                      value: _offerPickupService,
+                      onChanged: (value) {
+                        setState(() {
+                          _offerPickupService = value ?? false;
+                          if (!_offerPickupService) {
+                            _pickupServiceCostController.clear();
+                          }
+                        });
+                      },
+                      dense: true,
+                    ),
+                    if (_offerPickupService) ...[
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _pickupServiceCostController,
+                        decoration: const InputDecoration(labelText: 'Pickup Service Cost (RM)'),
+                        keyboardType: TextInputType.number,
+                        validator: (v) => _offerPickupService && (v == null || v.isEmpty) ? 'Required when offering pickup service' : null,
+                      ),
+                    ],
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
               const Text('Duration Available For Booking:', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1320,12 +1440,28 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     _housePhoneController.text = application['phone'] ?? '';
     _descriptionController.text = application['description'] ?? '';
     
-    // Parse prices
-    if (application['prices'] != null) {
-      _prices = List<Map<String, dynamic>>.from(application['prices']);
+    // Parse prices (keeping for backward compatibility but not using in form)
+    // Legacy prices are no longer editable, using new pricing structure instead
+    
+    // Parse new fields
+    _maxItemQuantityController.text = application['maxItemQuantity']?.toString() ?? '';
+    _pricePerItemController.text = application['pricePerItem']?.toString() ?? '';
+    _pickupServiceCostController.text = application['pickupServiceCost']?.toString() ?? '';
+    
+    // Parse payment methods
+    if (application['paymentMethods'] != null) {
+      final Map<String, dynamic> savedMethods = Map<String, dynamic>.from(application['paymentMethods']);
+      _paymentMethods = {
+        'cash': savedMethods['cash'] == true,
+        'online_banking': savedMethods['online_banking'] == true,
+        'ewallet': savedMethods['ewallet'] == true,
+      };
     } else {
-      _prices = [];
+      _paymentMethods = {'cash': false, 'online_banking': false, 'ewallet': false};
     }
+    
+    // Parse pickup service
+    _offerPickupService = application['offerPickupService'] == true;
     
     // Parse dates
     if (application['availableFrom'] != null) {

@@ -278,8 +278,8 @@ class OwnerNavBar extends StatelessWidget {
       unselectedItemColor: Colors.black,
       items: const [
         BottomNavigationBarItem(
-          icon: Icon(Icons.dashboard),
-          label: 'Dashboard',
+          icon: Icon(Icons.home),
+          label: 'Home',
         ),
         BottomNavigationBarItem(
           icon: Icon(Icons.notifications),
