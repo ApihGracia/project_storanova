@@ -41,7 +41,7 @@ class MyApp extends StatelessWidget {
       title: 'Profile App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: const Color(0xFFADD8E6),
+        scaffoldBackgroundColor: const Color(0xFFE3F2FD), // Soft blue background to match main theme
       ),
       home: const ProfileScreen(),
     );
@@ -69,7 +69,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? address;
   String? username;
   bool isLoading = true;
-  int _currentIndex = 2; // 0: Dashboard, 1: Notifications, 2: Profile
+  int _currentIndex = 3; // 0: Home, 1: Customers, 2: Notifications, 3: Profile
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -457,6 +457,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               filled: true,
                               fillColor: Colors.white,
                             ),
+                            validator: (v) => v == null || v.isEmpty ? 'Phone number required' : null,
                           ),
                           const SizedBox(height: 16),
                           TextFormField(
@@ -482,6 +483,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               filled: true,
                               fillColor: Colors.white,
                             ),
+                            validator: (v) => v == null || v.isEmpty ? 'Address required' : null,
                           ),
                           const SizedBox(height: 24),
                           Row(
@@ -494,8 +496,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     width: 120,
                                     child: ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFFB4D4FF), // Match app bar color
-                                        foregroundColor: Colors.black, // Black text for contrast
+                                        backgroundColor: const Color(0xFF1976D2), // Darker blue to match theme
+                                        foregroundColor: Colors.white, // White text for contrast
                                       ),
                                       onPressed: isLoading ? null : _startEdit,
                                       child: const Text('Edit'),
@@ -509,8 +511,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     width: 100,
                                     child: ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFFB4D4FF), // Match app bar color
-                                        foregroundColor: Colors.black, // Black text for contrast
+                                        backgroundColor: const Color(0xFF1976D2), // Darker blue to match theme
+                                        foregroundColor: Colors.white, // White text for contrast
                                       ),
                                       onPressed: isLoading || _isUploadingImage ? null : _saveProfile,
                                       child: const Text('Save'),
@@ -540,7 +542,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       bottomNavigationBar: OwnerNavBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          if (index < 0 || index > 2) return; // Safety: only allow 0-2 for owner nav (3 items)
+          if (index < 0 || index > 3) return; // Safety: only allow 0-3 for owner nav (4 items)
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
         },

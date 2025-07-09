@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'shared_widgets.dart';
 import 'database.dart';
-import 'booking_dialog.dart';
+import 'house_details_dialog.dart';
 
 class CustWishlistPage extends StatefulWidget {
   const CustWishlistPage({Key? key}) : super(key: key);
@@ -28,22 +28,28 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
       final username = await _getUsernameFromFirestore();
       if (username == null) return [];
       final result = await _db.getUserWishlist(username);
-      setState(() {
-        _isIndexBuilding = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isIndexBuilding = false;
+        });
+      }
       return result;
     } catch (e) {
       print('Error loading wishlist: $e');
       // If index is building, show empty list for now
       if (e.toString().contains('index is currently building')) {
-        setState(() {
-          _isIndexBuilding = true;
-        });
+        if (mounted) {
+          setState(() {
+            _isIndexBuilding = true;
+          });
+        }
         return [];
       }
-      setState(() {
-        _isIndexBuilding = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isIndexBuilding = false;
+        });
+      }
       return [];
     }
   }
@@ -66,9 +72,11 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
   }
 
   void _refreshWishlist() {
-    setState(() {
-      _wishlistFuture = _loadWishlist();
-    });
+    if (mounted) {
+      setState(() {
+        _wishlistFuture = _loadWishlist();
+      });
+    }
   }
 
   Future<void> _removeFromWishlist(String houseId) async {
@@ -91,205 +99,31 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
   void _showHouseDetails(Map<String, dynamic> wishlistItem) {
     final houseData = wishlistItem['houseData'] as Map<String, dynamic>;
     
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // House image(s) - using image slider for multiple images
-                if (houseData['imageUrls'] != null && 
-                    houseData['imageUrls'] is List && 
-                    (houseData['imageUrls'] as List).isNotEmpty)
-                  _ImageSlider(imageUrls: List<String>.from(houseData['imageUrls']))
-                else if (houseData['imageUrl'] != null)
-                  Center(
-                    child: GestureDetector(
-                      onTap: () => _showImageFullScreen(houseData['imageUrl']),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          houseData['imageUrl'],
-                          width: 250,
-                          height: 180,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-                
-                const SizedBox(height: 16),
-                
-                // House name
-                Text(
-                  wishlistItem['houseName'] ?? 'Unnamed House',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                ),
-                const SizedBox(height: 8),
-                
-                // House details
-                if (houseData['owner'] != null && houseData['owner'].toString().isNotEmpty)
-                  Text('Owner: ${houseData['owner']}', style: const TextStyle(fontSize: 15, color: Colors.black87)),
-                if (houseData['phone'] != null)
-                  Text('Phone: ${houseData['phone']}'),
-                
-                // Pricing information - prioritize new structure
-                if (houseData['pricePerItem'] != null && houseData['pricePerItem'].toString().isNotEmpty)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      Text('Price per Item: RM${houseData['pricePerItem']}', 
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                      if (houseData['maxItemQuantity'] != null && houseData['maxItemQuantity'].toString().isNotEmpty)
-                        Text('Max Items: ${houseData['maxItemQuantity']}'),
-                    ],
-                  )
-                // Fallback to legacy pricing structure
-                else if (houseData['prices'] != null && 
-                    houseData['prices'] is List && 
-                    (houseData['prices'] as List).isNotEmpty)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      const Text('Prices:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ...((houseData['prices'] as List).map<Widget>((p) {
-                        if (p is Map && p['amount'] != null && p['unit'] != null) {
-                          return Text('• RM${p['amount']} ${p['unit']}');
-                        }
-                        return const SizedBox.shrink();
-                      }).toList()),
-                    ],
-                  ),
-                // Show pickup service if offered
-                if (houseData['offerPickupService'] == true && houseData['pickupServiceCost'] != null)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 8),
-                      Text('Pickup Service Available: RM${houseData['pickupServiceCost']}', 
-                        style: const TextStyle(color: Colors.blue)),
-                    ],
-                  ),
-                
-                // Available dates
-                if (houseData['availableFrom'] != null && houseData['availableTo'] != null)
-                  Text(
-                    'Available: ${houseData['availableFrom'].toString().split('T')[0]} to ${houseData['availableTo'].toString().split('T')[0]}',
-                  ),
-                
-                const SizedBox(height: 20),
-                
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          _removeFromWishlist(wishlistItem['houseId']);
-                        },
-                        icon: const Icon(Icons.favorite),
-                        label: const Text('Remove from Wishlist'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red.shade100,
-                          foregroundColor: Colors.red,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          _showBookingDialog(wishlistItem, houseData);
-                        },
-                        icon: const Icon(Icons.calendar_today),
-                        label: const Text('Book Now'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade100,
-                          foregroundColor: Colors.green.shade700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Close'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showBookingDialog(Map<String, dynamic> wishlistItem, Map<String, dynamic> houseData) {
-    // Create a house object compatible with BookingDialog
+    // Create a house object compatible with HouseDetailsDialog
     final house = {
       'id': wishlistItem['houseId'],
-      'name': wishlistItem['houseName'],
+      'address': houseData['address'] ?? wishlistItem['houseAddress'] ?? 'No Address',
       'owner': houseData['owner'] ?? houseData['ownerName'] ?? wishlistItem['ownerUsername'] ?? '',
       'ownerUsername': wishlistItem['ownerUsername'],
-      'address': houseData['address'] ?? '',
       'phone': houseData['phone'] ?? '',
       'prices': houseData['prices'] ?? [],
       'availableFrom': houseData['availableFrom'],
       'availableTo': houseData['availableTo'],
       'imageUrls': houseData['imageUrls'] ?? [],
       'imageUrl': houseData['imageUrl'] ?? '',
+      'pricePerItem': houseData['pricePerItem'],
+      'maxItemQuantity': houseData['maxItemQuantity'],
+      'offerPickupService': houseData['offerPickupService'] ?? false,
+      'pickupServiceCost': houseData['pickupServiceCost'],
+      'paymentMethods': houseData['paymentMethods'] ?? {},
     };
-
+    
     showDialog(
       context: context,
-      builder: (context) => BookingDialog(
+      builder: (context) => HouseDetailsDialog(
         house: house,
-        onBookingComplete: () {
-          // Refresh wishlist after booking
-          _refreshWishlist();
-        },
-      ),
-    );
-  }
-
-  void _showImageFullScreen(String url) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => GestureDetector(
-        onTap: () => Navigator.of(context).pop(),
-        child: Container(
-          color: Colors.black.withOpacity(0.95),
-          child: Stack(
-            children: [
-              Center(
-                child: InteractiveViewer(
-                  child: Image.network(url, fit: BoxFit.contain),
-                ),
-              ),
-              Positioned(
-                top: 40,
-                right: 20,
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white, size: 32),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ),
-            ],
-          ),
-        ),
+        showRemoveFromWishlist: true,
+        onRemoveFromWishlist: () => _removeFromWishlist(wishlistItem['houseId']),
       ),
     );
   }
@@ -436,7 +270,7 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          houseData['address'] ?? item['houseName'] ?? 'Unnamed House',
+                                          houseData['address'] ?? item['houseAddress'] ?? 'No Address',
                                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,

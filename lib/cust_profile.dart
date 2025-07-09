@@ -500,6 +500,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               filled: true,
                               fillColor: Colors.white,
                             ),
+                            validator: (v) => v == null || v.isEmpty ? 'Phone number required' : null,
                           ),
                           const SizedBox(height: 16),
                           TextFormField(

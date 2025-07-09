@@ -88,7 +88,27 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'StoraNova Login',
       theme: ThemeData(
+        useMaterial3: true,
         primarySwatch: Colors.blue,
+        scaffoldBackgroundColor: const Color(0xFFE3F2FD), // Soft blue background
+        canvasColor: const Color(0xFFE3F2FD),
+        cardColor: Colors.white, // White cards for contrast
+        dialogBackgroundColor: Colors.white,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1976D2), // Darker blue for app bar
+          foregroundColor: Colors.white,
+          elevation: 2,
+        ),
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          backgroundColor: Color(0xFF1976D2), // Darker blue for bottom nav
+          selectedItemColor: Colors.white,
+          unselectedItemColor: Color(0xFFBBDEFB),
+        ),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF1976D2),
+          surface: Colors.white,
+          background: const Color(0xFFE3F2FD),
+        ),
       ),
       home: const SplashToLogin(),
     );

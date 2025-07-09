@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 import 'notifications_page.dart';
 import 'cust_dashboard.dart';
 import 'cust_profile.dart' as cust;
 import 'cust_wishlist.dart';
+import 'cust_booking_history.dart';
 import 'owner_dashboard.dart';
+import 'owner_customer_list.dart';
 import 'owner_profile.dart' as owner;
+import 'database.dart';
 
 // Common logout method
 Future<void> performLogout(BuildContext context) async {
@@ -16,6 +20,106 @@ Future<void> performLogout(BuildContext context) async {
     MaterialPageRoute(builder: (context) => const LoginPage()),
     (route) => false,
   );
+}
+
+// Helper function to get username from Firestore
+Future<String?> _getUsernameFromFirestore() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return null;
+  
+  final usersSnapshot = await FirebaseFirestore.instance
+      .collection('AppUsers')
+      .where('email', isEqualTo: user.email)
+      .limit(1)
+      .get();
+  
+  if (usersSnapshot.docs.isNotEmpty) {
+    return usersSnapshot.docs.first.id;
+  }
+  
+  return null;
+}
+
+// Notification Counter Widget
+class NotificationCounter extends StatefulWidget {
+  const NotificationCounter({Key? key}) : super(key: key);
+
+  @override
+  State<NotificationCounter> createState() => _NotificationCounterState();
+}
+
+class _NotificationCounterState extends State<NotificationCounter> {
+  final DatabaseService _db = DatabaseService();
+  int _notificationCount = 0;
+  String? _username;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotificationCount();
+  }
+
+  @override
+  void didUpdateWidget(NotificationCounter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Refresh the count when widget updates
+    _loadNotificationCount();
+  }
+
+  Future<void> _loadNotificationCount() async {
+    try {
+      _username = await _getUsernameFromFirestore();
+      if (_username != null) {
+        final count = await _db.getUnreadNotificationCount(_username!);
+        if (mounted) {
+          setState(() {
+            _notificationCount = count;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading notification count: $e');
+    }
+  }
+
+  // Method to refresh count (can be called from external widgets)
+  void refreshCount() {
+    _loadNotificationCount();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        const Icon(Icons.notifications),
+        if (_notificationCount > 0)
+          Positioned(
+            right: 0,
+            top: 0,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              constraints: const BoxConstraints(
+                minWidth: 16,
+                minHeight: 16,
+              ),
+              child: Text(
+                _notificationCount > 99 ? '99+' : _notificationCount.toString(),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 // Customer App Bar
@@ -33,14 +137,15 @@ class CustomerAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     return AppBar(
       automaticallyImplyLeading: showBackButton,
-      backgroundColor: const Color(0xFFB4D4FF),
-      elevation: 0,
-      title: Text(title),
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
+      foregroundColor: Colors.white,
+      elevation: 2,
+      title: Text(title, style: const TextStyle(color: Colors.white)),
       centerTitle: true,
       actions: [
         Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(Icons.more_vert, color: Colors.white),
             onPressed: () {
               Scaffold.of(context).openEndDrawer();
             },
@@ -67,14 +172,31 @@ class CustomerDrawer extends StatelessWidget {
           children: [
             const DrawerHeader(
               decoration: BoxDecoration(
-                color: Color(0xFFB4D4FF),
+                color: Color(0xFF1976D2), // Darker blue to match admin
               ),
               child: Text(
                 'Settings',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 24, 
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white, // White text for contrast
+                ),
               ),
             ),
             const SizedBox(height: 32), // Add some spacing instead of Spacer
+            ListTile(
+              leading: const Icon(Icons.history),
+              title: const Text('Booking History'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CustBookingHistory(),
+                  ),
+                );
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
@@ -136,9 +258,9 @@ class CustomerNavBar extends StatelessWidget {
         }
         onTap(index);
       },
-      backgroundColor: const Color(0xFFB4D4FF),
-      selectedItemColor: Colors.blue,
-      unselectedItemColor: Colors.black,
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
+      selectedItemColor: const Color(0xFF0D47A1), // Dark blue for selected
+      unselectedItemColor: const Color(0xFFBBDEFB), // Light blue for unselected
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home),
@@ -149,7 +271,7 @@ class CustomerNavBar extends StatelessWidget {
           label: 'Wishlist',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.notifications),
+          icon: NotificationCounter(),
           label: 'Notifications',
         ),
         BottomNavigationBarItem(
@@ -176,14 +298,15 @@ class OwnerAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     return AppBar(
       automaticallyImplyLeading: showBackButton,
-      backgroundColor: const Color(0xFFB4D4FF),
-      elevation: 0,
-      title: Text(title),
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
+      foregroundColor: Colors.white,
+      elevation: 2,
+      title: Text(title, style: const TextStyle(color: Colors.white)),
       centerTitle: true,
       actions: [
         Builder(
           builder: (context) => IconButton(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(Icons.more_vert, color: Colors.white),
             onPressed: () {
               Scaffold.of(context).openEndDrawer();
             },
@@ -210,11 +333,15 @@ class OwnerDrawer extends StatelessWidget {
           children: [
             const DrawerHeader(
               decoration: BoxDecoration(
-                color: Color(0xFFB4D4FF),
+                color: Color(0xFF1976D2), // Darker blue to match admin
               ),
               child: Text(
                 'Settings',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 24, 
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white, // White text for contrast
+                ),
               ),
             ),
             const SizedBox(height: 32), // Add some spacing instead of Spacer
@@ -258,13 +385,19 @@ class OwnerNavBar extends StatelessWidget {
               MaterialPageRoute(builder: (context) => const OwnerHomePage()),
             );
             break;
-          case 1: // Notifications
+          case 1: // Customer List
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const OwnerCustomerListPage()),
+            );
+            break;
+          case 2: // Notifications
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => const NotificationsPage(expectedRole: 'owner')),
             );
             break;
-          case 2: // Profile
+          case 3: // Profile
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (context) => const owner.ProfileScreen()),
@@ -273,16 +406,20 @@ class OwnerNavBar extends StatelessWidget {
         }
         onTap(index);
       },
-      backgroundColor: const Color(0xFFB4D4FF),
-      selectedItemColor: Colors.blue,
-      unselectedItemColor: Colors.black,
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
+      selectedItemColor: const Color(0xFF0D47A1), // Dark blue for selected
+      unselectedItemColor: const Color(0xFFBBDEFB), // Light blue
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home),
           label: 'Home',
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.notifications),
+          icon: Icon(Icons.people),
+          label: 'Customers',
+        ),
+        BottomNavigationBarItem(
+          icon: NotificationCounter(),
           label: 'Notifications',
         ),
         BottomNavigationBarItem(
@@ -310,7 +447,7 @@ class AdminAppBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       automaticallyImplyLeading: showBackButton,
       title: Text(title),
-      backgroundColor: Colors.blue,
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
       foregroundColor: Colors.white,
       actions: [
         Builder(
@@ -342,7 +479,7 @@ class AdminDrawer extends StatelessWidget {
           children: [
             const DrawerHeader(
               decoration: BoxDecoration(
-                color: Colors.blue,
+                color: Color(0xFF1976D2), // Darker blue
               ),
               child: Text(
                 'Settings',
@@ -385,9 +522,9 @@ class AdminNavBar extends StatelessWidget {
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
       onTap: onTap,
-      backgroundColor: const Color(0xFFB4D4FF),
-      selectedItemColor: Colors.blue,
-      unselectedItemColor: Colors.black,
+      backgroundColor: const Color(0xFF1976D2), // Darker blue
+      selectedItemColor: const Color(0xFF0D47A1), // Dark blue for selected
+      unselectedItemColor: const Color(0xFFBBDEFB), // Light blue
       items: const [
         BottomNavigationBarItem(
           icon: Icon(Icons.home),

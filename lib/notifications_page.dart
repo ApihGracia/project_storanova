@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'database.dart';
 import 'shared_widgets.dart';
+import 'owner_customer_list.dart';
 
 class NotificationsPage extends StatefulWidget {
   final String? expectedRole; // Optional hint about user role
@@ -174,7 +175,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         appBar = OwnerAppBar(title: 'Notifications');
         drawer = OwnerDrawer();
         bottomNavBar = OwnerNavBar(
-          currentIndex: 1, // Notifications is index 1 for owner
+          currentIndex: 2, // Notifications is index 2 for owner
           onTap: (index) {
             // Navigation handled by shared widget
           },
@@ -359,6 +360,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   banType: banType,
                 );
                 
+                // Automatically mark the notification as read
+                await _markAsRead(notification['id']);
+                
                 Navigator.of(context).pop();
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Appeal submitted successfully!')),
@@ -376,6 +380,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       ),
     );
   }
+
 }
 
 // Compact notification card for the list view
@@ -410,6 +415,10 @@ class CompactNotificationCard extends StatelessWidget {
       case 'appeal':
         iconColor = Colors.blue;
         icon = Icons.gavel;
+        break;
+      case 'booking':
+        iconColor = Colors.green;
+        icon = Icons.calendar_today;
         break;
       default:
         iconColor = Colors.blue;
@@ -512,6 +521,33 @@ class NotificationDetailsDialog extends StatefulWidget {
 
 class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
   bool _isAppealInProgress = false;
+  Map<String, dynamic>? _bookingDetails;
+  bool _isLoadingBooking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load booking details if this is a booking notification
+    if (widget.notification['type'] == 'booking' && widget.notification['relatedDocumentId'] != null) {
+      _loadBookingDetails();
+    }
+  }
+
+  Future<void> _loadBookingDetails() async {
+    setState(() => _isLoadingBooking = true);
+    try {
+      final db = DatabaseService();
+      final bookingId = widget.notification['relatedDocumentId'];
+      final booking = await db.getBookingById(bookingId);
+      setState(() {
+        _bookingDetails = booking;
+        _isLoadingBooking = false;
+      });
+    } catch (e) {
+      print('Error loading booking details: $e');
+      setState(() => _isLoadingBooking = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -538,6 +574,11 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
         backgroundColor = Colors.blue.withOpacity(0.1);
         borderColor = Colors.blue;
         icon = Icons.gavel;
+        break;
+      case 'booking':
+        backgroundColor = Colors.green.withOpacity(0.1);
+        borderColor = Colors.green;
+        icon = Icons.calendar_today;
         break;
       default:
         backgroundColor = Colors.blue.withOpacity(0.1);
@@ -609,6 +650,56 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                         color: Colors.grey,
                       ),
                     ),
+                    
+                    // Booking Details Section
+                    if (type == 'booking') ...[
+                      const SizedBox(height: 20),
+                      const Text(
+                        'Booking Details',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      const SizedBox(height: 12),
+                      if (_isLoadingBooking)
+                        const Center(child: CircularProgressIndicator())
+                      else if (_bookingDetails != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey.shade300),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildBookingDetailRow('Customer', _bookingDetails!['customerUsername'] ?? 'N/A'),
+                              _buildBookingDetailRow('House Address', _bookingDetails!['houseAddress'] ?? 'N/A'),
+                              _buildBookingDetailRow('Store Date', _formatDate(DateTime.parse(_bookingDetails!['checkIn']))),
+                              _buildBookingDetailRow('Pickup Date', _formatDate(DateTime.parse(_bookingDetails!['checkOut']))),
+                              if (_bookingDetails!['quantity'] != null)
+                                _buildBookingDetailRow('Quantity', '${_bookingDetails!['quantity']} items'),
+                              _buildBookingDetailRow('Total Price', 'RM${_bookingDetails!['totalPrice']?.toString() ?? '0'}'),
+                              if (_bookingDetails!['specialRequests'] != null && _bookingDetails!['specialRequests'].toString().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Special Requests:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                      const SizedBox(height: 4),
+                                      Text(_bookingDetails!['specialRequests'].toString(), style: const TextStyle(fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        const Text('Booking details could not be loaded.', style: TextStyle(color: Colors.red)),
+                      ],
+                    ],
+                    
                     if (type == 'ban') ...[
                       const SizedBox(height: 20),
                       Container(
@@ -667,23 +758,54 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
             // Actions
             Container(
               padding: const EdgeInsets.all(20),
-              child: Row(
+              child: Column(
                 children: [
-                  if (!isRead)
-                    Expanded(
-                      child: ElevatedButton(
+                  // Booking Notification Action (for owners)
+                  if (type == 'booking' && _bookingDetails != null && 
+                      _bookingDetails!['status'] == 'pending') ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
                         onPressed: () {
+                          // Mark as read and navigate to applications page
                           widget.onMarkAsRead(widget.notification['id']);
                           Navigator.of(context).pop();
+                          // Navigate to customer list page
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(builder: (context) => const OwnerCustomerListPage()),
+                          );
                         },
+                        icon: const Icon(Icons.assignment),
+                        label: const Text('Go to Applications'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.grey[600],
+                          backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
-                        child: const Text('Mark as Read'),
                       ),
                     ),
-                  if (!isRead && type == 'ban') const SizedBox(width: 12),
+                    const SizedBox(height: 12),
+                  ],
+                  
+                  // Regular Actions Row
+                  Row(
+                    children: [
+                      if (!isRead)
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              widget.onMarkAsRead(widget.notification['id']);
+                              Navigator.of(context).pop();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey[600],
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('Mark as Read'),
+                          ),
+                        ),
+                      if (!isRead && type == 'ban') const SizedBox(width: 12),
                   if (type == 'ban')
                     Expanded(
                       child: FutureBuilder<bool>(
@@ -713,6 +835,8 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                       child: const Text('Close'),
                     ),
                   ],
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -749,5 +873,29 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
 
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildBookingDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

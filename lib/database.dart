@@ -633,6 +633,17 @@ class DatabaseService {
         .update({'isRead': true});
   }
 
+  // READ: Get unread notification count for user
+  Future<int> getUnreadNotificationCount(String username) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('Notifications')
+        .where('username', isEqualTo: username)
+        .where('isRead', isEqualTo: false)
+        .get();
+        
+    return snapshot.docs.length;
+  }
+
   // WISHLIST METHODS
   
   // Add house to user's wishlist
@@ -713,12 +724,15 @@ class DatabaseService {
     required String customerUsername,
     required String ownerUsername,
     required String houseId,
-    required String houseName,
+    required String houseName, // This now stores the address
     required DateTime checkIn,
     required DateTime checkOut,
     required double totalPrice,
     required String priceBreakdown,
     String? specialRequests,
+    String? paymentMethod,
+    bool usePickupService = false,
+    int? quantity,
   }) async {
     // Generate booking ID
     final bookingSnapshot = await FirebaseFirestore.instance
@@ -733,12 +747,16 @@ class DatabaseService {
       'customerUsername': customerUsername,
       'ownerUsername': ownerUsername,
       'houseId': houseId,
-      'houseName': houseName,
+      'houseAddress': houseName, // Store as houseAddress in the database
+      'houseName': houseName, // Keep for backward compatibility
       'checkIn': checkIn.toIso8601String(),
       'checkOut': checkOut.toIso8601String(),
       'totalPrice': totalPrice,
       'priceBreakdown': priceBreakdown,
       'specialRequests': specialRequests,
+      'paymentMethod': paymentMethod,
+      'usePickupService': usePickupService,
+      'quantity': quantity,
       'status': 'pending', // pending, approved, rejected, cancelled
       'createdAt': DateTime.now().toIso8601String(),
       'reviewedAt': null,
@@ -784,17 +802,81 @@ class DatabaseService {
 
   // Get owner's booking requests
   Future<List<Map<String, dynamic>>> getOwnerBookingRequests(String ownerUsername) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('ownerUsername', isEqualTo: ownerUsername)
+          .get();
+
+      List<Map<String, dynamic>> bookings = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+
+      // Sort by createdAt in memory instead of using orderBy to avoid index requirement
+      bookings.sort((a, b) {
+        try {
+          final aDate = DateTime.parse(a['createdAt']);
+          final bDate = DateTime.parse(b['createdAt']);
+          return bDate.compareTo(aDate); // Descending order (newest first)
+        } catch (e) {
+          return 0;
+        }
+      });
+
+      return bookings;
+    } catch (e) {
+      print('Error loading owner booking requests: $e');
+      return [];
+    }
+  }
+
+  // Get all customers for an owner
+  Future<List<Map<String, dynamic>>> getAllCustomers() async {
     final snapshot = await FirebaseFirestore.instance
-        .collection('Bookings')
-        .where('ownerUsername', isEqualTo: ownerUsername)
-        .orderBy('createdAt', descending: true)
+        .collection('AppUsers')
+        .where('role', isEqualTo: 'Customer')
         .get();
 
     return snapshot.docs.map((doc) {
       final data = doc.data();
-      data['id'] = doc.id;
+      data['username'] = doc.id;
       return data;
     }).toList();
+  }
+
+  // Get pending booking applications for an owner
+  Future<List<Map<String, dynamic>>> getOwnerPendingBookings(String ownerUsername) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('ownerUsername', isEqualTo: ownerUsername)
+          .where('status', isEqualTo: 'pending')
+          .get();
+
+      List<Map<String, dynamic>> bookings = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+
+      // Sort by createdAt in memory instead of using orderBy to avoid index requirement
+      bookings.sort((a, b) {
+        try {
+          final aDate = DateTime.parse(a['createdAt']);
+          final bDate = DateTime.parse(b['createdAt']);
+          return bDate.compareTo(aDate); // Descending order (newest first)
+        } catch (e) {
+          return 0;
+        }
+      });
+
+      return bookings;
+    } catch (e) {
+      print('Error loading pending bookings: $e');
+      return [];
+    }
   }
 
   // Update booking status
@@ -816,7 +898,7 @@ class DatabaseService {
     if (bookingDoc.exists) {
       final bookingData = bookingDoc.data() as Map<String, dynamic>;
       final customerUsername = bookingData['customerUsername'];
-      final houseName = bookingData['houseName'];
+      final houseAddress = bookingData['houseAddress'] ?? bookingData['houseName'] ?? 'this address';
 
       // Send notification to customer
       String title = '';
@@ -825,15 +907,294 @@ class DatabaseService {
       switch (status) {
         case 'approved':
           title = 'Booking Approved';
-          message = 'Your booking for $houseName has been approved by the owner.';
+          final paymentMethod = bookingData['paymentMethod']?.toString().toLowerCase();
+          if (paymentMethod == 'cash') {
+            message = 'Your booking for $houseAddress has been approved! You can proceed with cash payment during service.';
+          } else {
+            message = 'Your booking for $houseAddress has been approved! Please proceed with payment to confirm your reservation.';
+          }
           break;
         case 'rejected':
           title = 'Booking Rejected';
-          message = 'Your booking for $houseName has been rejected. ${reviewComments != null ? "Reason: $reviewComments" : ""}';
+          message = 'Your booking for $houseAddress has been rejected. ${reviewComments != null ? "Reason: $reviewComments" : ""}';
           break;
         case 'cancelled':
           title = 'Booking Cancelled';
-          message = 'Your booking for $houseName has been cancelled.';
+          message = 'Your booking for $houseAddress has been cancelled.';
+          break;
+      }
+
+      if (title.isNotEmpty) {
+        await addNotification(
+          username: customerUsername,
+          title: title,
+          message: message,
+          type: 'booking',
+          relatedDocumentId: bookingId,
+        );
+      }
+    }
+  }
+
+  // Update a pending booking
+  Future<void> updateBooking({
+    required String bookingId,
+    required String customerUsername,
+    required String ownerUsername,
+    required String houseId,
+    required String houseName,
+    required DateTime checkIn,
+    required DateTime checkOut,
+    required double totalPrice,
+    required String priceBreakdown,
+    String? specialRequests,
+    String? paymentMethod,
+    bool usePickupService = false,
+    int? quantity,
+  }) async {
+    // Check if booking is still pending
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (!bookingDoc.exists) {
+      throw Exception('Booking not found');
+    }
+    
+    final bookingData = bookingDoc.data() as Map<String, dynamic>;
+    if (bookingData['status'] != 'pending') {
+      throw Exception('Can only edit pending bookings');
+    }
+    
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+      'checkIn': checkIn.toIso8601String(),
+      'checkOut': checkOut.toIso8601String(),
+      'totalPrice': totalPrice,
+      'priceBreakdown': priceBreakdown,
+      'specialRequests': specialRequests,
+      'paymentMethod': paymentMethod,
+      'usePickupService': usePickupService,
+      'quantity': quantity,
+    });
+  }
+
+  // Delete/cancel a pending booking
+  Future<void> deleteBooking(String bookingId) async {
+    // Check if booking is still pending
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (!bookingDoc.exists) {
+      throw Exception('Booking not found');
+    }
+    
+    final bookingData = bookingDoc.data() as Map<String, dynamic>;
+    if (bookingData['status'] != 'pending') {
+      throw Exception('Can only delete pending bookings');
+    }
+    
+    // Delete the booking
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).delete();
+    
+    // Send notification to owner about cancellation
+    final ownerUsername = bookingData['ownerUsername'];
+    final houseAddress = bookingData['houseAddress'] ?? bookingData['houseName'] ?? 'this address';
+    final customerUsername = bookingData['customerUsername'];
+    
+    await addNotification(
+      username: ownerUsername,
+      title: 'Booking Cancelled',
+      message: 'The booking request for $houseAddress from $customerUsername has been cancelled.',
+      type: 'booking',
+      relatedDocumentId: bookingId,
+    );
+  }
+
+  // Get booking by ID
+  Future<Map<String, dynamic>?> getBookingById(String bookingId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(bookingId)
+          .get();
+      
+      if (doc.exists) {
+        final data = doc.data()!;
+        data['id'] = doc.id;
+        return data;
+      }
+      return null;
+    } catch (e) {
+      print('Error fetching booking: $e');
+      return null;
+    }
+  }
+
+  // Update payment status for a booking
+  Future<void> updatePaymentStatus({
+    required String bookingId,
+    required String paymentStatus,
+    String? paymentReceivedBy,
+  }) async {
+    final updateData = {
+      'paymentStatus': paymentStatus,
+      'paymentUpdatedAt': DateTime.now().toIso8601String(),
+    };
+    
+    if (paymentReceivedBy != null) {
+      updateData['paymentReceivedBy'] = paymentReceivedBy;
+      updateData['paymentReceivedAt'] = DateTime.now().toIso8601String();
+    }
+    
+    await FirebaseFirestore.instance
+        .collection('Bookings')
+        .doc(bookingId)
+        .update(updateData);
+  }
+
+  // Cancel a booking
+  Future<void> cancelBooking({
+    required String bookingId,
+    required String cancelledBy,
+    String? cancelReason,
+  }) async {
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+      'status': 'cancelled',
+      'cancelledAt': DateTime.now().toIso8601String(),
+      'cancelledBy': cancelledBy,
+      'cancelReason': cancelReason,
+    });
+
+    // Get booking details for notification
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (bookingDoc.exists) {
+      final bookingData = bookingDoc.data() as Map<String, dynamic>;
+      final customerUsername = bookingData['customerUsername'];
+      final ownerUsername = bookingData['ownerUsername'];
+      final houseAddress = bookingData['houseAddress'] ?? bookingData['houseName'] ?? 'this address';
+
+      // Send notification to owner
+      await addNotification(
+        username: ownerUsername,
+        title: 'Booking Cancelled',
+        message: 'The booking for $houseAddress has been cancelled by $customerUsername.',
+        type: 'booking',
+        relatedDocumentId: bookingId,
+      );
+
+      // Send notification to customer
+      await addNotification(
+        username: customerUsername,
+        title: 'Booking Cancelled',
+        message: 'Your booking for $houseAddress has been cancelled.',
+        type: 'booking',
+        relatedDocumentId: bookingId,
+      );
+    }
+  }
+
+  // Complete payment for a booking
+  Future<void> completePayment({
+    required String bookingId,
+  }) async {
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+      'paymentStatus': 'completed',
+      'paymentCompletedAt': DateTime.now().toIso8601String(),
+    });
+
+    // Get booking details for notification
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (bookingDoc.exists) {
+      final bookingData = bookingDoc.data() as Map<String, dynamic>;
+      final customerUsername = bookingData['customerUsername'];
+      final ownerUsername = bookingData['ownerUsername'];
+      final houseAddress = bookingData['houseAddress'] ?? bookingData['houseName'] ?? 'this address';
+
+      // Send notification to owner
+      await addNotification(
+        username: ownerUsername,
+        title: 'Payment Completed',
+        message: 'Payment for the booking at $houseAddress has been completed by $customerUsername.',
+        type: 'booking',
+        relatedDocumentId: bookingId,
+      );
+
+      // Send notification to customer
+      await addNotification(
+        username: customerUsername,
+        title: 'Payment Successful',
+        message: 'Your payment for $houseAddress has been completed successfully. Your booking is now confirmed!',
+        type: 'booking',
+        relatedDocumentId: bookingId,
+      );
+    }
+  }
+
+  // Get approved bookings awaiting payment for a customer
+  Future<List<Map<String, dynamic>>> getCustomerApprovedBookingsAwaitingPayment(String customerUsername) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('customerUsername', isEqualTo: customerUsername)
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      List<Map<String, dynamic>> bookings = snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+
+      // Filter for non-cash payments that haven't been completed
+      bookings = bookings.where((booking) {
+        final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+        final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+        return paymentMethod != 'cash' && paymentStatus != 'completed';
+      }).toList();
+
+      // Sort by approvedAt/reviewedAt in descending order
+      bookings.sort((a, b) {
+        try {
+          final aDate = DateTime.parse(a['reviewedAt'] ?? a['createdAt']);
+          final bDate = DateTime.parse(b['reviewedAt'] ?? b['createdAt']);
+          return bDate.compareTo(aDate);
+        } catch (e) {
+          return 0;
+        }
+      });
+
+      return bookings;
+    } catch (e) {
+      print('Error loading approved bookings awaiting payment: $e');
+      return [];
+    }
+  }
+
+  // Update storage status for a booking
+  Future<void> updateStorageStatus({
+    required String bookingId,
+    required String storageStatus, // 'not_stored', 'stored', 'picked_up'
+    required String updatedBy,
+  }) async {
+    await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+      'storageStatus': storageStatus,
+      'storageStatusUpdatedAt': DateTime.now().toIso8601String(),
+      'storageStatusUpdatedBy': updatedBy,
+    });
+
+    // Get booking details for notification
+    final bookingDoc = await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).get();
+    if (bookingDoc.exists) {
+      final bookingData = bookingDoc.data() as Map<String, dynamic>;
+      final customerUsername = bookingData['customerUsername'];
+      final houseAddress = bookingData['houseAddress'] ?? bookingData['houseName'] ?? 'this address';
+
+      String title = '';
+      String message = '';
+
+      switch (storageStatus) {
+        case 'stored':
+          title = 'Items Stored';
+          message = 'Your items have been stored at $houseAddress. They are safe and ready for pickup when you need them.';
+          break;
+        case 'picked_up':
+          title = 'Items Picked Up';
+          message = 'Your items from $houseAddress have been marked as picked up. Thank you for using StoraNova!';
           break;
       }
 

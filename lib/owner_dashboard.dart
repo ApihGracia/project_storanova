@@ -11,6 +11,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'shared_widgets.dart';
 import 'notifications_page.dart';
+import 'profile_validator.dart';
 
 class OwnerDashboard extends StatelessWidget {
   @override
@@ -71,7 +72,7 @@ class OwnerHomePage extends StatefulWidget {
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 0; // 0: Dashboard, 1: Notifications, 2: Profile
+  int _currentIndex = 0; // 0: Home, 1: Customers, 2: Notifications, 3: Profile
   House? _house;
   bool _isLoading = true;
   bool _showHouseForm = false;
@@ -177,7 +178,14 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     return null;
   }
 
-  void _showRegisterHouseForm({House? house}) {
+  void _showRegisterHouseForm({House? house}) async {
+    // Check if profile is complete before allowing house registration
+    final isProfileComplete = await ProfileValidator.isOwnerProfileComplete();
+    if (!isProfileComplete) {
+      ProfileValidator.showProfileIncompleteDialog(context, isOwner: true);
+      return;
+    }
+
     setState(() {
       _showHouseForm = true;
       _editingApplicationId = null; // Clear editing state for new application
@@ -660,59 +668,17 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                       const SizedBox(height: 20),
                     ],
                     const SizedBox(height: 20),
-                    const Text(
-                      'Latest News',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: 150,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          _buildNewsCard(
-                            imageUrl:
-                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                          ),
-                          _buildNewsCard(
-                            imageUrl:
-                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                          ),
-                          _buildNewsCard(
-                            imageUrl:
-                                'https://www.gstatic.com/flutter-onestack-prototype/genui/example_1.jpg',
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),
             ),
       bottomNavigationBar: OwnerNavBar(
-        currentIndex: (_currentIndex >= 0 && _currentIndex <= 2) ? _currentIndex : 0,
+        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
         onTap: (index) {
-          if (index < 0 || index > 2) return; // Only allow valid indices for owner nav (3 items)
+          if (index < 0 || index > 3) return; // Only allow valid indices for owner nav (4 items)
           if (index == _currentIndex) return;
           setState(() => _currentIndex = index);
         },
-      ),
-    );
-  }
-
-  Widget _buildNewsCard({required String imageUrl}) {
-    return Card(
-      child: Container(
-        width: 200,
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: NetworkImage(imageUrl),
-            fit: BoxFit.cover,
-          ),
-        ),
       ),
     );
   }
