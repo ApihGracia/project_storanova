@@ -149,6 +149,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         notification: notification,
         onMarkAsRead: _markAsRead,
         onAppeal: _handleAppeal,
+        userRole: _userRole,
       ),
     );
   }
@@ -507,12 +508,14 @@ class NotificationDetailsDialog extends StatefulWidget {
   final Map<String, dynamic> notification;
   final Function(String) onMarkAsRead;
   final Function(Map<String, dynamic>) onAppeal;
+  final String userRole;
 
   const NotificationDetailsDialog({
     Key? key,
     required this.notification,
     required this.onMarkAsRead,
     required this.onAppeal,
+    required this.userRole,
   }) : super(key: key);
 
   @override
@@ -531,6 +534,21 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
     if (widget.notification['type'] == 'booking' && widget.notification['relatedDocumentId'] != null) {
       _loadBookingDetails();
     }
+  }
+
+  // Get customer name
+  Future<String?> _getCustomerName(String customerUsername) async {
+    try {
+      final db = DatabaseService();
+      final userDoc = await db.getUserByUsername(customerUsername);
+      if (userDoc != null && userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        return userData['name'] as String?;
+      }
+    } catch (e) {
+      print('Error getting customer name: $e');
+    }
+    return null;
   }
 
   Future<void> _loadBookingDetails() async {
@@ -673,7 +691,16 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildBookingDetailRow('Customer', _bookingDetails!['customerUsername'] ?? 'N/A'),
+                              FutureBuilder<String?>(
+                                future: _getCustomerName(_bookingDetails!['customerUsername']),
+                                builder: (context, snapshot) {
+                                  if (snapshot.connectionState == ConnectionState.waiting) {
+                                    return _buildBookingDetailRow('Customer', 'Loading...');
+                                  }
+                                  final customerName = snapshot.data;
+                                  return _buildBookingDetailRow('Customer', customerName ?? _bookingDetails!['customerUsername'] ?? 'N/A');
+                                },
+                              ),
                               _buildBookingDetailRow('House Address', _bookingDetails!['houseAddress'] ?? 'N/A'),
                               _buildBookingDetailRow('Store Date', _formatDate(DateTime.parse(_bookingDetails!['checkIn']))),
                               _buildBookingDetailRow('Pickup Date', _formatDate(DateTime.parse(_bookingDetails!['checkOut']))),
@@ -760,9 +787,9 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  // Booking Notification Action (for owners)
+                  // Booking Notification Action (for owners only)
                   if (type == 'booking' && _bookingDetails != null && 
-                      _bookingDetails!['status'] == 'pending') ...[
+                      _bookingDetails!['status'] == 'pending' && widget.userRole == 'owner') ...[
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
@@ -780,6 +807,34 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                         label: const Text('Go to Applications'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  
+                  // Payment completion prompt (for customers with approved applications - non-cash only)
+                  if (type == 'booking' && _bookingDetails != null && 
+                      _bookingDetails!['status'] == 'approved' && 
+                      _bookingDetails!['paymentMethod'] != 'cash' &&
+                      _bookingDetails!['paymentStatus'] != 'completed' &&
+                      widget.userRole == 'customer') ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          // Mark as read and navigate to booking page for payment
+                          widget.onMarkAsRead(widget.notification['id']);
+                          Navigator.of(context).pop();
+                          // Navigate to customer dashboard where they can complete payment
+                          Navigator.pushReplacementNamed(context, '/customer_dashboard');
+                        },
+                        icon: const Icon(Icons.payment),
+                        label: const Text('Complete Payment'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),

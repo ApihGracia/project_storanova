@@ -17,6 +17,13 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
   List<Map<String, dynamic>> _customerList = [];
   String? _ownerUsername;
   bool _isLoading = true;
+  int _currentApplicationPage = 0; // For pagination
+  static const int _applicationsPerPage = 3;
+  int _currentCustomerPage = 0; // For customer list pagination
+  static const int _customersPerPage = 10;
+  
+  // Cache for customer data to avoid loading delays
+  final Map<String, Map<String, dynamic>> _customerDataCache = {};
 
   @override
   void initState() {
@@ -85,22 +92,38 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
           // Applications waiting for owner approval/rejection
           pendingApplications.add(booking);
         } else if (status == 'approved') {
-          // Approved applications - keep in application list until payment is completed
-          // Exception: cash payments go directly to customer list
+          // For cash payments, move directly to customer list after approval
           if (paymentMethod == 'cash') {
             customerList.add(booking);
           } else {
-            // Online banking/e-wallet - stay in application list until paid
-            pendingApplications.add(booking);
+            // For non-cash payments, check if they've paid
+            if (paymentStatus == 'completed') {
+              // Payment completed, move to customer list
+              customerList.add(booking);
+            } else {
+              // Still waiting for payment
+              pendingApplications.add(booking);
+            }
           }
         } else if (status == 'paid' || status == 'completed') {
-          // Paid bookings go to customer list
+          // Completed bookings (after payment) go to customer list
           customerList.add(booking);
         }
         // Skip cancelled and rejected bookings
       }
       
       print('Owner customer list: ${pendingApplications.length} pending applications, ${customerList.length} customers');
+      
+      // Preload customer data to avoid display delays
+      final allCustomerUsernames = {...pendingApplications, ...customerList}
+          .map((booking) => booking['customerUsername'] as String?)
+          .where((username) => username != null)
+          .cast<String>()
+          .toSet();
+      
+      for (final username in allCustomerUsernames) {
+        await _getCustomerData(username); // This will cache the data
+      }
       
       setState(() {
         _pendingApplications = pendingApplications;
@@ -111,46 +134,41 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
     }
   }
 
-  // Get customer profile image URL
-  Future<String?> _getCustomerProfileImage(String customerUsername) async {
+  // Get customer data (cached)
+  Future<Map<String, dynamic>?> _getCustomerData(String customerUsername) async {
+    if (_customerDataCache.containsKey(customerUsername)) {
+      return _customerDataCache[customerUsername];
+    }
+    
     try {
       final userDoc = await _db.getUserByUsername(customerUsername);
       if (userDoc != null && userDoc.exists) {
         final userData = userDoc.data() as Map<String, dynamic>;
-        return userData['profileImageUrl'] as String?;
+        _customerDataCache[customerUsername] = userData;
+        return userData;
       }
     } catch (e) {
-      print('Error getting customer profile image: $e');
+      print('Error getting customer data: $e');
     }
     return null;
+  }
+
+  // Get customer profile image URL
+  Future<String?> _getCustomerProfileImage(String customerUsername) async {
+    final userData = await _getCustomerData(customerUsername);
+    return userData?['profileImageUrl'] as String?;
   }
 
   // Get customer name
   Future<String?> _getCustomerName(String customerUsername) async {
-    try {
-      final userDoc = await _db.getUserByUsername(customerUsername);
-      if (userDoc != null && userDoc.exists) {
-        final userData = userDoc.data() as Map<String, dynamic>;
-        return userData['name'] as String?;
-      }
-    } catch (e) {
-      print('Error getting customer name: $e');
-    }
-    return null;
+    final userData = await _getCustomerData(customerUsername);
+    return userData?['name'] as String?;
   }
 
   // Get customer phone number
   Future<String?> _getCustomerPhone(String customerUsername) async {
-    try {
-      final userDoc = await _db.getUserByUsername(customerUsername);
-      if (userDoc != null && userDoc.exists) {
-        final userData = userDoc.data() as Map<String, dynamic>;
-        return userData['phone'] as String?;
-      }
-    } catch (e) {
-      print('Error getting customer phone: $e');
-    }
-    return null;
+    final userData = await _getCustomerData(customerUsername);
+    return userData?['phone'] as String?;
   }
 
   // Booking status helper methods
@@ -201,7 +219,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
   String _getBookingStatusText(String? status, String? paymentMethod) {
     switch (status?.toLowerCase()) {
       case 'pending':
-        return 'PENDING APPLICATION';
+        return 'PENDING';
       case 'approved':
         // If approved but payment method is not cash, show pending payment
         if (paymentMethod?.toLowerCase() != 'cash') {
@@ -221,50 +239,175 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
     }
   }
 
+  // Enhanced status text that considers payment status
+  String _getEnhancedBookingStatusText(Map<String, dynamic> booking) {
+    final status = booking['status']?.toString().toLowerCase();
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+    
+    switch (status) {
+      case 'pending':
+        return 'PENDING APPLICATION';
+      case 'approved':
+        if (paymentMethod == 'cash') {
+          // For cash payments, approved means ready for collection
+          return 'APPROVED - CASH';
+        } else {
+          // For online payments, check if payment is completed
+          if (paymentStatus == 'completed') {
+            return 'PAID';
+          } else {
+            return 'PENDING PAYMENT';
+          }
+        }
+      case 'paid':
+        return 'PAID';
+      case 'completed':
+        return 'COMPLETED';
+      case 'cancelled':
+        return 'CANCELLED';
+      case 'rejected':
+        return 'REJECTED';
+      default:
+        return status?.toUpperCase() ?? 'UNKNOWN';
+    }
+  }
+
+  // Enhanced status color that considers payment status
+  Color _getEnhancedBookingStatusColor(Map<String, dynamic> booking) {
+    final status = booking['status']?.toString().toLowerCase();
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+    
+    switch (status) {
+      case 'pending':
+        return Colors.orange.shade50;
+      case 'approved':
+        if (paymentMethod == 'cash') {
+          return Colors.green.shade50;
+        } else {
+          if (paymentStatus == 'completed') {
+            return Colors.blue.shade50; // Paid color
+          } else {
+            return Colors.orange.shade50; // Still pending payment
+          }
+        }
+      case 'paid':
+      case 'completed':
+        return Colors.blue.shade50;
+      case 'cancelled':
+        return Colors.grey.shade50;
+      case 'rejected':
+        return Colors.red.shade50;
+      default:
+        return Colors.grey.shade50;
+    }
+  }
+
+  // Enhanced status text color that considers payment status
+  Color _getEnhancedBookingStatusTextColor(Map<String, dynamic> booking) {
+    final status = booking['status']?.toString().toLowerCase();
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+    
+    switch (status) {
+      case 'pending':
+        return Colors.orange.shade700;
+      case 'approved':
+        if (paymentMethod == 'cash') {
+          return Colors.green.shade700;
+        } else {
+          if (paymentStatus == 'completed') {
+            return Colors.blue.shade700; // Paid color
+          } else {
+            return Colors.orange.shade700; // Still pending payment
+          }
+        }
+      case 'paid':
+      case 'completed':
+        return Colors.blue.shade700;
+      case 'cancelled':
+        return Colors.grey.shade700;
+      case 'rejected':
+        return Colors.red.shade700;
+      default:
+        return Colors.grey.shade700;
+    }
+  }
+
   // Build storage status dropdown
-  Widget _buildStorageStatusDropdown(Map<String, dynamic> booking) {
+  Widget _buildStorageStatusDropdown(Map<String, dynamic> booking, {bool isCompact = false}) {
     final currentStatus = booking['storageStatus'] ?? 'not_stored';
+    final fontSize = isCompact ? 10.0 : 12.0; // Increased from 9.0 for better readability
+    final iconSize = isCompact ? 14.0 : 16.0; // Increased from 12.0
+    final padding = isCompact 
+        ? const EdgeInsets.symmetric(horizontal: 6, vertical: 2) // Increased padding slightly
+        : const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
     
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: padding,
       decoration: BoxDecoration(
         color: _getStorageStatusColor(currentStatus),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: _getStorageStatusTextColor(currentStatus)),
       ),
-      child: DropdownButton<String>(
-        value: currentStatus,
-        underline: Container(),
-        style: TextStyle(
-          fontSize: 12,
-          color: _getStorageStatusTextColor(currentStatus),
-          fontWeight: FontWeight.w500,
-        ),
-        dropdownColor: Colors.white,
-        icon: Icon(
-          Icons.arrow_drop_down,
-          size: 16,
-          color: _getStorageStatusTextColor(currentStatus),
-        ),
-        items: const [
-          DropdownMenuItem(
-            value: 'not_stored',
-            child: Text('Not Stored', style: TextStyle(fontSize: 12)),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              isCompact ? (currentStatus == 'picked_up' ? 'Picked' : (currentStatus == 'stored' ? 'Stored' : 'None')) : _getStorageDisplayText(currentStatus),
+              style: TextStyle(
+                fontSize: fontSize,
+                color: _getStorageStatusTextColor(currentStatus),
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          DropdownMenuItem(
-            value: 'stored',
-            child: Text('Stored', style: TextStyle(fontSize: 12)),
-          ),
-          DropdownMenuItem(
-            value: 'picked_up',
-            child: Text('Picked Up', style: TextStyle(fontSize: 12)),
+          DropdownButton<String>(
+            value: currentStatus,
+            underline: Container(),
+            icon: Icon(
+              Icons.arrow_drop_down,
+              size: iconSize,
+              color: _getStorageStatusTextColor(currentStatus),
+            ),
+            isDense: true,
+            items: isCompact ? [
+              DropdownMenuItem(
+                value: 'not_stored',
+                child: Text('None', style: TextStyle(fontSize: fontSize)),
+              ),
+              DropdownMenuItem(
+                value: 'stored',
+                child: Text('Stored', style: TextStyle(fontSize: fontSize)),
+              ),
+              DropdownMenuItem(
+                value: 'picked_up',
+                child: Text('Picked', style: TextStyle(fontSize: fontSize)), // Shortened text for compact
+              ),
+            ] : [
+              DropdownMenuItem(
+                value: 'not_stored',
+                child: Text('None', style: TextStyle(fontSize: fontSize)),
+              ),
+              DropdownMenuItem(
+                value: 'stored',
+                child: Text('Stored', style: TextStyle(fontSize: fontSize)),
+              ),
+              DropdownMenuItem(
+                value: 'picked_up',
+                child: Text('Picked Up', style: TextStyle(fontSize: fontSize)),
+              ),
+            ],
+            onChanged: (String? newStatus) {
+              if (newStatus != null && newStatus != currentStatus) {
+                _updateStorageStatus(booking['id'], newStatus);
+              }
+            },
           ),
         ],
-        onChanged: (String? newStatus) {
-          if (newStatus != null && newStatus != currentStatus) {
-            _updateStorageStatus(booking['id'], newStatus);
-          }
-        },
       ),
     );
   }
@@ -437,20 +580,10 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
     );
   }
 
-  // Get row color based on booking status and payment method
-  Color _getRowColor(Map<String, dynamic> booking) {
-    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
-    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
-    
-    if (paymentMethod == 'cash' && paymentStatus != 'completed') {
-      return Colors.amber.shade50; // Highlight cash payments for owner attention
-    }
-    return Colors.white;
-  }
-
   // Show booking details dialog
   void _showBookingDetails(Map<String, dynamic> booking) {
     final bool isPendingApplication = booking['status']?.toString().toLowerCase() == 'pending';
+    final bool isApprovedApplication = booking['status']?.toString().toLowerCase() == 'approved';
     
     // Helper function to format date
     String formatDate(dynamic date) {
@@ -488,7 +621,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                     children: [
                       Expanded(
                         child: Text(
-                          isPendingApplication ? 'Application Details' : 'Booking Details',
+                          (isPendingApplication || isApprovedApplication) ? 'Application Details' : 'Booking Details',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
                         ),
                       ),
@@ -502,7 +635,20 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                   const SizedBox(height: 12),
                   
                   // Customer Information
-                  _buildDetailRow('Customer', booking['customerUsername'] ?? 'N/A'),
+                  FutureBuilder<String?>(
+                    future: _getCustomerName(booking['customerUsername']),
+                    builder: (context, snapshot) {
+                      // Since we preload customer data, this should resolve quickly
+                      final customerName = snapshot.data;
+                      if (customerName != null && customerName.isNotEmpty) {
+                        return _buildDetailRow('Customer', customerName);
+                      } else if (snapshot.connectionState == ConnectionState.waiting) {
+                        return _buildDetailRow('Customer', 'Loading...');
+                      } else {
+                        return _buildDetailRow('Customer', '@${booking['customerUsername'] ?? 'N/A'}');
+                      }
+                    },
+                  ),
                   _buildDetailRow('House Address', booking['houseAddress'] ?? 'No Address'),
                   
                   // Booking Status
@@ -525,14 +671,14 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _getBookingStatusColor(booking['status'], booking['paymentMethod']),
+                            color: _getEnhancedBookingStatusColor(booking),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod'])),
+                            border: Border.all(color: _getEnhancedBookingStatusTextColor(booking)),
                           ),
                           child: Text(
-                            _getBookingStatusText(booking['status'], booking['paymentMethod']),
+                            _getEnhancedBookingStatusText(booking),
                             style: TextStyle(
-                              color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod']),
+                              color: _getEnhancedBookingStatusTextColor(booking),
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
@@ -563,8 +709,8 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                   if (booking['paymentStatus'] != null)
                     _buildDetailRow('Payment Status', booking['paymentStatus'].toString()),
                   
-                  // Storage Status (only for approved bookings)
-                  if (!isPendingApplication)
+                  // Storage Status (only for completed bookings in customer list)
+                  if (!isPendingApplication && !isApprovedApplication)
                     _buildDetailRow('Storage Status', _getStorageDisplayText(booking['storageStatus'] ?? 'not_stored')),
                   
                   // Special Requests
@@ -608,7 +754,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                       ),
                     ),
                   
-                  // Action buttons for pending applications
+                  // Action buttons for pending applications only
                   if (isPendingApplication) ...[
                     const SizedBox(height: 20),
                     const Divider(),
@@ -622,7 +768,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                               _approveApplication(booking);
                             },
                             icon: const Icon(Icons.check, size: 18),
-                            label: const Text('Approve Application'),
+                            label: const Text('Approve'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
                               foregroundColor: Colors.white,
@@ -638,7 +784,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                               _showRejectDialog(booking);
                             },
                             icon: const Icon(Icons.close, size: 18),
-                            label: const Text('Reject Application'),
+                            label: const Text('Reject'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.red,
                               foregroundColor: Colors.white,
@@ -647,6 +793,36 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                           ),
                         ),
                       ],
+                    ),
+                  ] else if (isApprovedApplication) ...[
+                    // For approved applications waiting for payment
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.payment, color: Colors.blue.shade700, size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Application approved. Waiting for customer payment.',
+                              style: TextStyle(
+                                color: Colors.blue.shade700,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ],
@@ -694,217 +870,288 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
         return 'Picked Up';
       case 'not_stored':
       default:
-        return 'Not Stored';
+        return 'None';
     }
   }
 
-  // Build card for all bookings (both applications and customers)
+  // Build card for customer list (completed bookings only)
   Widget _buildCustomerCard(Map<String, dynamic> booking) {
-    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
-    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
-    final isCashPayment = paymentMethod == 'cash';
-    final isPaymentCompleted = paymentStatus == 'completed';
-    final isPendingApplication = booking['status']?.toString().toLowerCase() == 'pending' || 
-        (booking['status']?.toString().toLowerCase() == 'approved' && paymentMethod != 'cash');
+    // Get the customer list number with pagination
+    final customerIndex = _getCurrentPageCustomers().indexOf(booking) + 1 + (_currentCustomerPage * _customersPerPage);
     
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return InkWell(
+      onTap: () => _showBookingDetails(booking),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        decoration: BoxDecoration(
-          color: _getRowColor(booking),
-          borderRadius: BorderRadius.circular(12),
-          border: isCashPayment && !isPaymentCompleted 
-              ? Border.all(color: Colors.amber.shade300, width: 2)
-              : isPendingApplication
-                  ? Border.all(color: Colors.orange.shade300, width: 2)
-                  : null,
-        ),
-        child: InkWell(
-          onTap: () => _showBookingDetails(booking),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    // Customer profile image
-                    FutureBuilder<String?>(
-                      future: _getCustomerProfileImage(booking['customerUsername']),
-                      builder: (context, snapshot) {
-                        final imageUrl = snapshot.data;
-                        return Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: imageUrl != null && imageUrl.isNotEmpty
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Image.network(
-                                    imageUrl,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => Icon(
-                                      Icons.person,
-                                      color: Colors.grey.shade600,
-                                      size: 24,
-                                    ),
-                                  ),
-                                )
-                              : Icon(
-                                  Icons.person,
-                                  color: Colors.grey.shade600,
-                                  size: 24,
-                                ),
-                        );
-                      },
+        height: 55, // Slightly increased height for better spacing
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 6.0), // Reduced horizontal padding
+        child: Row(
+          children: [
+            // List number (22px - reduced)
+            SizedBox(
+              width: 22,
+              child: Text(
+                '#$customerIndex',
+                style: const TextStyle(
+                  fontSize: 12, // Increased from 10
+                  color: Colors.black, // Changed from grey to black
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6), // Reduced spacing
+            
+            // Customer profile image (36px - further reduced)
+            SizedBox(
+              width: 36,
+              child: FutureBuilder<String?>(
+                future: _getCustomerProfileImage(booking['customerUsername']),
+                builder: (context, snapshot) {
+                  final imageUrl = snapshot.data;
+                  return Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(18),
                     ),
-                    const SizedBox(width: 10),
-                    // Customer info
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          FutureBuilder<String?>(
-                            future: _getCustomerName(booking['customerUsername']),
-                            builder: (context, snapshot) {
-                              final customerName = snapshot.data;
-                              return Text(
-                                '@${booking['customerUsername']}${customerName != null ? ' ($customerName)' : ''}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 1),
-                          FutureBuilder<String?>(
-                            future: _getCustomerPhone(booking['customerUsername']),
-                            builder: (context, snapshot) {
-                              final phone = snapshot.data;
-                              return Text(
-                                phone ?? 'No phone number',
-                                style: const TextStyle(fontSize: 11, color: Colors.black87),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 2),
-                          // Payment status indicator
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: _getBookingStatusColor(booking['status'], booking['paymentMethod']),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod'])),
-                            ),
-                            child: Text(
-                              isCashPayment 
-                                  ? (isPaymentCompleted ? 'CASH - PAID' : 'CASH - PENDING')
-                                  : _getBookingStatusText(booking['status'], booking['paymentMethod']),
-                              style: TextStyle(
-                                color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod']),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 10,
+                    child: imageUrl != null && imageUrl.isNotEmpty
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Icon(
+                                Icons.person,
+                                color: Colors.grey.shade600,
+                                size: 16,
                               ),
                             ),
+                          )
+                        : Icon(
+                            Icons.person,
+                            color: Colors.grey.shade600,
+                            size: 16,
                           ),
-                        ],
-                      ),
-                    ),
-                    // Storage status dropdown (only for non-pending bookings)
-                    if (!isPendingApplication)
-                      _buildStorageStatusDropdown(booking),
-                  ],
-                ),
-                
-                // Action buttons for pending applications (only for truly pending, not pending payment)
-                if (isPendingApplication && booking['status']?.toString().toLowerCase() == 'pending') ...[
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _approveApplication(booking),
-                          icon: const Icon(Icons.check, size: 16),
-                          label: const Text('Approve', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _showRejectDialog(booking),
-                          icon: const Icon(Icons.close, size: 16),
-                          label: const Text('Reject', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else if (isPendingApplication && booking['status']?.toString().toLowerCase() == 'approved') ...[
-                  // For approved applications waiting for payment, show a different message
-                  const SizedBox(height: 12),
-                  const Divider(height: 1),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.blue.shade300),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.payment, color: Colors.blue.shade700, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Waiting for customer payment',
-                            style: TextStyle(
-                              color: Colors.blue.shade700,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
+                  );
+                },
+              ),
             ),
-          ),
+            const SizedBox(width: 8), // Consistent spacing
+            
+            // Customer info and phone (flexible)
+            Expanded(
+              child: FutureBuilder<List<String?>>(
+                future: Future.wait([
+                  _getCustomerPhone(booking['customerUsername']),
+                ]),
+                builder: (context, snapshot) {
+                  final phone = snapshot.data?[0];
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '@${booking['customerUsername']}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Reduced from 14
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (phone != null && phone.isNotEmpty)
+                        Text(
+                          phone,
+                          style: const TextStyle(
+                            fontSize: 12, // Increased from 10
+                            color: Colors.grey,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            
+            const SizedBox(width: 6), // Reduced spacing before status dropdown
+            
+            // Storage status dropdown (compact) - smaller size but bigger text
+            SizedBox(
+              width: 65, // Reduced from 68
+              child: _buildStorageStatusDropdown(booking, isCompact: true),
+            ),
+          ],
         ),
       ),
     );
   }
 
+  // Build compact card for application list (5-column format)
+  Widget _buildApplicationCard(Map<String, dynamic> booking, int index) {
+    return InkWell(
+      onTap: () => _showBookingDetails(booking),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 60, // Slightly increased height to accommodate phone number
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0), // Reduced horizontal padding
+        child: Row(
+          children: [
+            // Column 1: Application Number (22px - reduced)
+            SizedBox(
+              width: 22,
+              child: Center(
+                child: Text(
+                  '#${index + 1 + (_currentApplicationPage * _applicationsPerPage)}',
+                  style: const TextStyle(
+                    fontSize: 12, // Increased from 10
+                    color: Colors.black, // Changed from grey to black
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4), // Reduced spacing
+            
+            // Column 2: Profile Image (36px - further optimized)
+            SizedBox(
+              width: 36,
+              child: FutureBuilder<String?>(
+                future: _getCustomerProfileImage(booking['customerUsername']),
+                builder: (context, snapshot) {
+                  final imageUrl = snapshot.data;
+                  return Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: imageUrl != null && imageUrl.isNotEmpty
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Icon(
+                                Icons.person,
+                                color: Colors.grey.shade600,
+                                size: 16,
+                              ),
+                            ),
+                          )
+                        : Icon(
+                            Icons.person,
+                            color: Colors.grey.shade600,
+                            size: 16,
+                          ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: 6), // Reduced spacing
+            
+            // Column 3: Username and Phone (flexible)
+            Expanded(
+              flex: 3,
+              child: FutureBuilder<String?>(
+                future: _getCustomerPhone(booking['customerUsername']),
+                builder: (context, snapshot) {
+                  final phone = snapshot.data;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        '@${booking['customerUsername']}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Reduced from 14
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (phone != null && phone.isNotEmpty)
+                        Text(
+                          phone,
+                          style: const TextStyle(
+                            fontSize: 12, // Increased from 10
+                            color: Colors.grey,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            
+            // Column 4: Item quantity (55px) - Increased to fit "X items" in one line
+            SizedBox(
+              width: 55,
+              child: Text(
+                '${booking['quantity'] ?? 0} items',
+                style: const TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600), // Increased to match username size
+                textAlign: TextAlign.center,
+                maxLines: 1, // Changed to 1 line for better display
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            
+            const SizedBox(width: 4), // Reduced space between quantity and status
+            
+            // Column 5: Status (70px, right aligned) - Increased to accommodate larger text
+            SizedBox(
+              width: 70,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 1, vertical: 2), // Minimal padding
+                decoration: BoxDecoration(
+                  color: _getBookingStatusColor(booking['status'], booking['paymentMethod']),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod'])),
+                ),
+                child: Text(
+                  _getBookingStatusText(booking['status'], booking['paymentMethod']),
+                  style: TextStyle(
+                    color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod']),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 10, // Increased from 7 to 10 for better readability (close to username size but still fitting)
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Pagination helper methods for applications
+  int _getTotalPages() {
+    return (_pendingApplications.length / _applicationsPerPage).ceil();
+  }
+
+  List<Map<String, dynamic>> _getCurrentPageApplications() {
+    final startIndex = _currentApplicationPage * _applicationsPerPage;
+    final endIndex = (startIndex + _applicationsPerPage).clamp(0, _pendingApplications.length);
+    return _pendingApplications.sublist(startIndex, endIndex);
+  }
+
+  // Pagination helper methods for customers
+  int _getTotalCustomerPages() {
+    return (_customerList.length / _customersPerPage).ceil();
+  }
+
+  List<Map<String, dynamic>> _getCurrentPageCustomers() {
+    final startIndex = _currentCustomerPage * _customersPerPage;
+    final endIndex = (startIndex + _customersPerPage).clamp(0, _customerList.length);
+    return _customerList.sublist(startIndex, endIndex);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const OwnerAppBar(title: 'Customer List'),
+      appBar: const OwnerAppBar(title: 'Customer Management'),
       endDrawer: const OwnerDrawer(),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -913,58 +1160,275 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Customer List Section
-                  Row(
-                    children: [
-                      const Icon(Icons.people, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      Text(
-                        'All Customers (${_customerList.length + _pendingApplications.length})',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  
-                  if (_customerList.isEmpty && _pendingApplications.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: const Column(
-                        children: [
-                          Icon(Icons.people_outline, size: 48, color: Colors.grey),
-                          SizedBox(height: 8),
-                          Text(
-                            'No customers or applications',
-                            style: TextStyle(fontSize: 16, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    Column(
-                      children: [
-                        // Show pending applications first
-                        ..._pendingApplications.map((booking) => Column(
-                          children: [
-                            _buildCustomerCard(booking),
-                            const SizedBox(height: 8),
-                          ],
-                        )),
-                        // Then show customer list
-                        ..._customerList.map((booking) => Column(
-                          children: [
-                            _buildCustomerCard(booking),
-                            const SizedBox(height: 8),
-                          ],
-                        )),
+                  // Application List Section
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.shade200,
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
                       ],
                     ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.pending_actions, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Application List (${_pendingApplications.length})',
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        if (_pendingApplications.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: const Column(
+                              children: [
+                                Icon(Icons.inbox_outlined, size: 48, color: Colors.grey),
+                                SizedBox(height: 8),
+                                Text(
+                                  'No pending applications',
+                                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          // Show applications with pagination
+                          Column(
+                            children: [
+                              // Application list
+                              ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: _getCurrentPageApplications().length,
+                                separatorBuilder: (context, index) => Divider(
+                                  height: 1,
+                                  color: Colors.grey.shade300,
+                                ),
+                                itemBuilder: (context, index) {
+                                  final booking = _getCurrentPageApplications()[index];
+                                  return _buildApplicationCard(booking, index);
+                                },
+                              ),
+                              
+                              // Pagination controls
+                              if (_getTotalPages() > 1) ...[
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    // Previous button
+                                    IconButton(
+                                      onPressed: _currentApplicationPage > 0 
+                                          ? () => setState(() => _currentApplicationPage--) 
+                                          : null,
+                                      icon: const Icon(Icons.arrow_back_ios),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: _currentApplicationPage > 0 
+                                            ? Colors.blue.shade50 
+                                            : Colors.grey.shade100,
+                                        foregroundColor: _currentApplicationPage > 0 
+                                            ? Colors.blue.shade700 
+                                            : Colors.grey.shade400,
+                                      ),
+                                    ),
+                                    
+                                    // Page indicator
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: Colors.blue.shade200),
+                                      ),
+                                      child: Text(
+                                        'Page ${_currentApplicationPage + 1} of ${_getTotalPages()}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    
+                                    // Next button
+                                    IconButton(
+                                      onPressed: _currentApplicationPage < _getTotalPages() - 1 
+                                          ? () => setState(() => _currentApplicationPage++) 
+                                          : null,
+                                      icon: const Icon(Icons.arrow_forward_ios),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: _currentApplicationPage < _getTotalPages() - 1 
+                                            ? Colors.blue.shade50 
+                                            : Colors.grey.shade100,
+                                        foregroundColor: _currentApplicationPage < _getTotalPages() - 1 
+                                            ? Colors.blue.shade700 
+                                            : Colors.grey.shade400,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 32),
+                  
+                  // Customer List Section
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade300),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.grey.shade200,
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.people, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Customer List (${_customerList.length})',
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        if (_customerList.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: const Column(
+                              children: [
+                                Icon(Icons.people_outline, size: 48, color: Colors.grey),
+                                SizedBox(height: 8),
+                                Text(
+                                  'You have no customers yet',
+                                  style: TextStyle(fontSize: 16, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          // Show customers with pagination
+                          Column(
+                            children: [
+                              // Customer list
+                              ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: _getCurrentPageCustomers().length,
+                                separatorBuilder: (context, index) => Divider(
+                                  height: 1,
+                                  color: Colors.grey.shade300,
+                                ),
+                                itemBuilder: (context, index) {
+                                  final booking = _getCurrentPageCustomers()[index];
+                                  return _buildCustomerCard(booking);
+                                },
+                              ),
+                              
+                              // Customer pagination controls
+                              if (_getTotalCustomerPages() > 1) ...[
+                                const SizedBox(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    // Previous button
+                                    IconButton(
+                                      onPressed: _currentCustomerPage > 0 
+                                          ? () => setState(() => _currentCustomerPage--) 
+                                          : null,
+                                      icon: const Icon(Icons.arrow_back_ios),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: _currentCustomerPage > 0 
+                                            ? Colors.blue.shade50 
+                                            : Colors.grey.shade100,
+                                        foregroundColor: _currentCustomerPage > 0 
+                                            ? Colors.blue.shade700 
+                                            : Colors.grey.shade400,
+                                      ),
+                                    ),
+                                    
+                                    // Page indicator
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: Colors.blue.shade200),
+                                      ),
+                                      child: Text(
+                                        'Page ${_currentCustomerPage + 1} of ${_getTotalCustomerPages()}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.blue.shade700,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    
+                                    // Next button
+                                    IconButton(
+                                      onPressed: _currentCustomerPage < _getTotalCustomerPages() - 1 
+                                          ? () => setState(() => _currentCustomerPage++) 
+                                          : null,
+                                      icon: const Icon(Icons.arrow_forward_ios),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: _currentCustomerPage < _getTotalCustomerPages() - 1 
+                                            ? Colors.blue.shade50 
+                                            : Colors.grey.shade100,
+                                        foregroundColor: _currentCustomerPage < _getTotalCustomerPages() - 1 
+                                            ? Colors.blue.shade700 
+                                            : Colors.grey.shade400,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),

@@ -45,27 +45,68 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
       final username = await _getUsernameFromFirestore();
       if (username != null) {
         final allBookings = await _db.getUserBookings(username);
-        // Filter to show completed, paid, cancelled, or rejected bookings
+        // Show ALL bookings except pending and approved (without payment)
         final historyBookings = allBookings.where((booking) {
           final status = booking['status']?.toString().toLowerCase();
           final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+          final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
           
-          // Show cancelled, rejected, or successfully paid bookings
-          return status == 'cancelled' || 
-                 status == 'rejected' ||
-                 status == 'completed' ||
-                 (status == 'approved' && paymentStatus == 'completed') ||
-                 (status == 'paid' && paymentStatus == 'completed');
+          // Show bookings that are:
+          // 1. Cancelled by customer (even after approval)
+          // 2. Rejected by owner
+          // 3. Completed (fully done)
+          // 4. Paid (payment completed)
+          // 5. Cash bookings after owner approval (cash = immediate payment)
+          return status == 'cancelled' ||        // Cancelled by customer
+                 status == 'rejected' ||         // Rejected by owner  
+                 status == 'completed' ||        // Fully completed
+                 status == 'paid' ||             // Paid bookings
+                 (status == 'approved' && paymentStatus == 'completed') ||  // Approved and paid
+                 (status == 'approved' && paymentMethod == 'cash' && paymentStatus != 'pending');  // Cash payments after owner confirms payment collection
         }).toList();
         
-        // Sort by most recent first
+        // Sort by most recent first with better error handling
         historyBookings.sort((a, b) {
-          final aTime = a['createdAt'] as Timestamp?;
-          final bTime = b['createdAt'] as Timestamp?;
-          if (aTime != null && bTime != null) {
-            return bTime.compareTo(aTime);
+          try {
+            final aTime = a['createdAt'];
+            final bTime = b['createdAt'];
+            
+            DateTime aDateTime, bDateTime;
+            
+            // Handle different time formats more robustly
+            if (aTime is Timestamp) {
+              aDateTime = aTime.toDate();
+            } else if (aTime is String) {
+              try {
+                aDateTime = DateTime.parse(aTime);
+              } catch (e) {
+                print('Error parsing date string: $aTime, error: $e');
+                return 0; // Keep original order if can't parse
+              }
+            } else {
+              print('Unknown date type for booking ${a['id']}: ${aTime.runtimeType}');
+              return 0;
+            }
+            
+            if (bTime is Timestamp) {
+              bDateTime = bTime.toDate();
+            } else if (bTime is String) {
+              try {
+                bDateTime = DateTime.parse(bTime);
+              } catch (e) {
+                print('Error parsing date string: $bTime, error: $e');
+                return 0; // Keep original order if can't parse
+              }
+            } else {
+              print('Unknown date type for booking ${b['id']}: ${bTime.runtimeType}');
+              return 0;
+            }
+            
+            return bDateTime.compareTo(aDateTime);
+          } catch (e) {
+            print('Error sorting bookings: $e');
+            return 0;
           }
-          return 0;
         });
         
         setState(() {
@@ -81,7 +122,7 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
     }
   }
 
-  // Helper function to format date in dd/mm/yyyy format
+  // Helper function to format date in dd/mm/yyyy format with better error handling
   String _formatDate(dynamic date) {
     if (date == null) return '';
     try {
@@ -89,13 +130,20 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
       if (date is Timestamp) {
         dateTime = date.toDate();
       } else if (date is String) {
-        dateTime = DateTime.parse(date);
+        try {
+          dateTime = DateTime.parse(date);
+        } catch (e) {
+          print('Error parsing date string in _formatDate: $date, error: $e');
+          return date; // Return original string if can't parse
+        }
       } else {
-        return '';
+        print('Unknown date type in _formatDate: ${date.runtimeType}');
+        return date.toString();
       }
       return '${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}';
     } catch (e) {
-      return '';
+      print('Error formatting date: $e');
+      return date?.toString() ?? '';
     }
   }
 
@@ -160,7 +208,7 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
   }
 
   void _showBookingDetails(BuildContext context, Map<String, dynamic> booking) {
-    // Helper function to format date
+    // Helper function to format date with better error handling
     String formatDate(dynamic date) {
       if (date == null) return 'N/A';
       try {
@@ -168,13 +216,20 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
         if (date is Timestamp) {
           dateTime = date.toDate();
         } else if (date is String) {
-          dateTime = DateTime.parse(date);
+          try {
+            dateTime = DateTime.parse(date);
+          } catch (e) {
+            print('Error parsing date string in formatDate: $date, error: $e');
+            return date; // Return original string if can't parse
+          }
         } else {
-          return 'N/A';
+          print('Unknown date type in formatDate: ${date.runtimeType}');
+          return date.toString();
         }
         return '${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year}';
       } catch (e) {
-        return 'N/A';
+        print('Error in formatDate: $e');
+        return date?.toString() ?? 'N/A';
       }
     }
 
@@ -281,6 +336,59 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
                     _buildDetailRow('Payment Method', booking['paymentMethod'].toString()),
                   if (booking['paymentStatus'] != null)
                     _buildDetailRow('Payment Status', booking['paymentStatus'].toString()),
+                  
+                  // Rejection reason (only for rejected bookings)
+                  if (booking['status']?.toString().toLowerCase() == 'rejected') ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SizedBox(
+                                width: 130,
+                                child: Text(
+                                  'Rejection Reason',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const Text(
+                                ': ',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.cancel, color: Colors.red.shade700, size: 16),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    booking['reviewComments']?.toString() ?? 'No reason provided',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.red.shade700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   
                   // Special Requests - aligned with other details
                   if (booking['specialRequests'] != null && booking['specialRequests'].toString().isNotEmpty)
