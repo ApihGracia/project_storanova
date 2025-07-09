@@ -150,8 +150,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
         onMarkAsRead: _markAsRead,
         onAppeal: _handleAppeal,
         userRole: _userRole,
+        onDelete: _deleteNotification,
       ),
     );
+  }
+  Future<void> _deleteNotification(String notificationId) async {
+    try {
+      await _db.deleteNotification(notificationId);
+      _loadNotifications();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notification deleted.')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting notification: $e')),
+      );
+    }
   }
 
   @override
@@ -509,6 +523,7 @@ class NotificationDetailsDialog extends StatefulWidget {
   final Function(String) onMarkAsRead;
   final Function(Map<String, dynamic>) onAppeal;
   final String userRole;
+  final Function(String) onDelete;
 
   const NotificationDetailsDialog({
     Key? key,
@@ -516,6 +531,7 @@ class NotificationDetailsDialog extends StatefulWidget {
     required this.onMarkAsRead,
     required this.onAppeal,
     required this.userRole,
+    required this.onDelete,
   }) : super(key: key);
 
   @override
@@ -567,16 +583,18 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
     }
   }
 
+  bool _showDelete = false;
+
   @override
   Widget build(BuildContext context) {
     final isRead = widget.notification['isRead'] ?? false;
     final type = widget.notification['type'] as String;
     final createdAt = DateTime.parse(widget.notification['createdAt']);
-    
+
     Color backgroundColor;
     Color borderColor;
     IconData icon;
-    
+
     switch (type) {
       case 'ban':
         backgroundColor = Colors.red.withOpacity(0.1);
@@ -611,42 +629,79 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: backgroundColor,
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-                border: Border.all(color: borderColor),
-              ),
-              child: Row(
-                children: [
-                  Icon(icon, color: borderColor, size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      widget.notification['title'] ?? 'Notification',
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
+            // Header with Delete Button at the top right (only if read or _showDelete is true)
+            Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: backgroundColor,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
+                    ),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(icon, color: borderColor, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          widget.notification['title'] ?? 'Notification',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                      if (!isRead)
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Delete button at the top right corner (only if read or _showDelete is true)
+                if (isRead || _showDelete)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      tooltip: 'Delete Notification',
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Delete Notification'),
+                            content: const Text('Are you sure you want to delete this notification?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(true),
+                                child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true) {
+                          widget.onDelete(widget.notification['id']);
+                          Navigator.of(context).pop();
+                        }
+                      },
                     ),
                   ),
-                  if (!isRead)
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
             
             // Content
@@ -671,7 +726,7 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                     
                     // Booking Details Section
                     if (type == 'booking') ...[
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 10),
                       const Text(
                         'Booking Details',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -849,9 +904,11 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                       if (!isRead)
                         Expanded(
                           child: ElevatedButton(
-                            onPressed: () {
-                              widget.onMarkAsRead(widget.notification['id']);
-                              Navigator.of(context).pop();
+                            onPressed: () async {
+                              await widget.onMarkAsRead(widget.notification['id']);
+                              setState(() {
+                                _showDelete = true;
+                              });
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.grey[600],
@@ -861,35 +918,34 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                           ),
                         ),
                       if (!isRead && type == 'ban') const SizedBox(width: 12),
-                  if (type == 'ban')
-                    Expanded(
-                      child: FutureBuilder<bool>(
-                        future: _checkExistingAppeal(),
-                        builder: (context, snapshot) {
-                          final hasAppeal = snapshot.data ?? false;
-                          
-                          return ElevatedButton(
-                            onPressed: hasAppeal || _isAppealInProgress ? null : () {
-                              setState(() => _isAppealInProgress = true);
-                              widget.onAppeal(widget.notification);
-                              Navigator.of(context).pop();
+                      if (type == 'ban')
+                        Expanded(
+                          child: FutureBuilder<bool>(
+                            future: _checkExistingAppeal(),
+                            builder: (context, snapshot) {
+                              final hasAppeal = snapshot.data ?? false;
+                              return ElevatedButton(
+                                onPressed: hasAppeal || _isAppealInProgress ? null : () {
+                                  setState(() => _isAppealInProgress = true);
+                                  widget.onAppeal(widget.notification);
+                                  Navigator.of(context).pop();
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: hasAppeal ? Colors.grey : Colors.orange,
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: Text(hasAppeal ? 'Appeal Submitted' : 'Submit Appeal'),
+                              );
                             },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: hasAppeal ? Colors.grey : Colors.orange,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: Text(hasAppeal ? 'Appeal Submitted' : 'Submit Appeal'),
-                          );
-                        },
-                      ),
-                    ),
-                  if (isRead || type != 'ban') ...[
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Close'),
-                    ),
-                  ],
+                          ),
+                        ),
+                      if (isRead || type != 'ban') ...[
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Close'),
+                        ),
+                      ],
                     ],
                   ),
                 ],

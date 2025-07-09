@@ -644,6 +644,14 @@ class DatabaseService {
     return snapshot.docs.length;
   }
 
+  // DELETE: Delete notification by ID
+  Future<void> deleteNotification(String notificationId) async {
+    await FirebaseFirestore.instance
+        .collection('Notifications')
+        .doc(notificationId)
+        .delete();
+  }
+
   // WISHLIST METHODS
   
   // Add house to user's wishlist
