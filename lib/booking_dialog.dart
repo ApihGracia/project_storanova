@@ -6,11 +6,13 @@ import 'database.dart';
 class BookingDialog extends StatefulWidget {
   final Map<String, dynamic> house;
   final VoidCallback onBookingComplete;
+  final Map<String, dynamic>? booking; // For edit mode
 
   const BookingDialog({
     Key? key,
     required this.house,
     required this.onBookingComplete,
+    this.booking, // Optional booking data for edit mode
   }) : super(key: key);
 
   @override
@@ -27,6 +29,35 @@ class _BookingDialogState extends State<BookingDialog> {
   final _specialRequestsController = TextEditingController();
   final DatabaseService _db = DatabaseService();
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeBookingData();
+  }
+
+  void _initializeBookingData() {
+    if (widget.booking != null) {
+      // Edit mode - pre-fill with existing booking data
+      try {
+        _checkInDate = DateTime.parse(widget.booking!['checkIn']);
+        _checkOutDate = DateTime.parse(widget.booking!['checkOut']);
+      } catch (e) {
+        _checkInDate = DateTime.now();
+        _checkOutDate = DateTime.now().add(const Duration(days: 1));
+      }
+      
+      _selectedPriceOption = widget.booking!['priceOption'];
+      // Don't set payment method here - it will be validated in _getAvailablePaymentMethods
+      _usePickupService = widget.booking!['pickupService'] ?? widget.booking!['usePickupService'] ?? false;
+      _specialRequestsController.text = widget.booking!['specialRequests'] ?? '';
+      
+      // For quantity-based pricing, set the quantity value
+      if (widget.booking!['quantity'] != null) {
+        _selectedPriceOption = widget.booking!['quantity'].toString();
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -56,7 +87,9 @@ class _BookingDialogState extends State<BookingDialog> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Book ${widget.house['address'] ?? 'House'}',
+                    widget.booking != null 
+                        ? 'Edit Booking for ${widget.house['address'] ?? 'House'}'
+                        : 'Book ${widget.house['address'] ?? 'House'}',
                     style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 16),
@@ -84,6 +117,7 @@ class _BookingDialogState extends State<BookingDialog> {
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
                       keyboardType: TextInputType.number,
+                      initialValue: widget.booking != null ? widget.booking!['quantity']?.toString() : null,
                       onChanged: (value) => setState(() => _selectedPriceOption = value),
                       validator: (value) {
                         if (value == null || value.isEmpty) return 'Please enter quantity';
@@ -205,7 +239,7 @@ class _BookingDialogState extends State<BookingDialog> {
                           ),
                           child: _isLoading
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Submit Booking'),
+                              : Text(widget.booking != null ? 'Update Booking' : 'Submit Booking'),
                         ),
                       ),
                     ],
@@ -313,6 +347,21 @@ class _BookingDialogState extends State<BookingDialog> {
     if (paymentMethods['online_banking'] == true) availableMethods.add('Online Banking');
     if (paymentMethods['ewallet'] == true) availableMethods.add('E-Wallet');
 
+    // If no payment methods configured in house, provide default options
+    if (availableMethods.isEmpty) {
+      availableMethods = ['Cash'];
+    }
+
+    // For edit mode, validate the payment method once when methods are available
+    if (widget.booking != null && _selectedPaymentMethod == null && availableMethods.isNotEmpty) {
+      final originalPaymentMethod = widget.booking!['paymentMethod'];
+      if (originalPaymentMethod != null && availableMethods.contains(originalPaymentMethod)) {
+        _selectedPaymentMethod = originalPaymentMethod;
+      } else {
+        _selectedPaymentMethod = availableMethods.first;
+      }
+    }
+
     return availableMethods;
   }
 
@@ -361,50 +410,111 @@ class _BookingDialogState extends State<BookingDialog> {
     setState(() => _isLoading = true);
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) throw Exception('User not logged in');
+      if (widget.booking != null) {
+        // Update existing booking
+        final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
+        
+        // Calculate pricing for update
+        double totalPrice = 0;
+        int? quantity;
+        String priceBreakdown = '';
+        
+        if (hasNewPricing) {
+          quantity = int.parse(_selectedPriceOption!);
+          final pricePerItem = double.parse(widget.house['pricePerItem'].toString());
+          totalPrice = quantity * pricePerItem;
+          priceBreakdown = 'RM$pricePerItem per item × $quantity items';
+        } else {
+          // For old pricing structure, parse the selected option
+          if (_selectedPriceOption != null && _selectedPriceOption!.contains('RM')) {
+            final regex = RegExp(r'RM(\d+(?:\.\d+)?)');
+            final match = regex.firstMatch(_selectedPriceOption!);
+            if (match != null) {
+              totalPrice = double.parse(match.group(1)!);
+            }
+            priceBreakdown = _selectedPriceOption!;
+          }
+        }
 
-      final usersSnapshot = await FirebaseFirestore.instance
-          .collection('AppUsers')
-          .where('email', isEqualTo: user.email)
-          .limit(1)
-          .get();
+        if (_usePickupService) {
+          final pickupCost = double.tryParse(widget.house['pickupServiceCost']?.toString() ?? '50') ?? 50;
+          totalPrice += pickupCost;
+        }
 
-      if (usersSnapshot.docs.isEmpty) throw Exception('User not found');
-      final username = usersSnapshot.docs.first.id;
+        // Update booking data
+        final updatedBookingData = {
+          'checkIn': _checkInDate!.toIso8601String(),
+          'checkOut': _checkOutDate!.toIso8601String(),
+          'priceOption': _selectedPriceOption,
+          'paymentMethod': _selectedPaymentMethod,
+          'pickupService': _usePickupService,
+          'usePickupService': _usePickupService, // Keep both for compatibility
+          'specialRequests': _specialRequestsController.text.trim(),
+          'totalPrice': totalPrice,
+          'priceBreakdown': priceBreakdown,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
 
-      final total = _calculateTotal();
-      final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
+        if (quantity != null) {
+          updatedBookingData['quantity'] = quantity;
+        }
 
-      String priceBreakdown;
-      if (hasNewPricing) {
-        final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
-        priceBreakdown = 'RM${widget.house['pricePerItem']} per item × $quantity items';
+        // Update the booking in Firestore
+        await FirebaseFirestore.instance
+            .collection('Bookings')
+            .doc(widget.booking!['id'])
+            .update(updatedBookingData);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Booking updated successfully!')),
+        );
       } else {
-        final days = _checkOutDate!.difference(_checkInDate!).inDays;
-        priceBreakdown = '$_selectedPriceOption for $days days';
+        // Create new booking (existing logic)
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) throw Exception('User not logged in');
+
+        final usersSnapshot = await FirebaseFirestore.instance
+            .collection('AppUsers')
+            .where('email', isEqualTo: user.email)
+            .limit(1)
+            .get();
+
+        if (usersSnapshot.docs.isEmpty) throw Exception('User not found');
+        final username = usersSnapshot.docs.first.id;
+
+        final total = _calculateTotal();
+        final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
+
+        String priceBreakdown;
+        if (hasNewPricing) {
+          final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
+          priceBreakdown = 'RM${widget.house['pricePerItem']} per item × $quantity items';
+        } else {
+          final days = _checkOutDate!.difference(_checkInDate!).inDays;
+          priceBreakdown = '$_selectedPriceOption for $days days';
+        }
+
+        await _db.createBooking(
+          customerUsername: username,
+          ownerUsername: widget.house['ownerUsername'] ?? widget.house['owner'] ?? '',
+          houseId: _generateHouseId(widget.house),
+          houseAddress: widget.house['address'] ?? 'No Address',
+          checkIn: _checkInDate!,
+          checkOut: _checkOutDate!,
+          totalPrice: total,
+          priceBreakdown: priceBreakdown,
+          specialRequests: _specialRequestsController.text.trim().isEmpty
+              ? null
+              : _specialRequestsController.text.trim(),
+          paymentMethod: _selectedPaymentMethod,
+          usePickupService: _usePickupService,
+          quantity: hasNewPricing ? (int.tryParse(_selectedPriceOption!) ?? 0) : null,
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Booking submitted successfully!')),
+        );
       }
-
-      await _db.createBooking(
-        customerUsername: username,
-        ownerUsername: widget.house['ownerUsername'] ?? widget.house['owner'] ?? '',
-        houseId: _generateHouseId(widget.house),
-        houseName: widget.house['address'] ?? 'No Address',
-        checkIn: _checkInDate!,
-        checkOut: _checkOutDate!,
-        totalPrice: total,
-        priceBreakdown: priceBreakdown,
-        specialRequests: _specialRequestsController.text.trim().isEmpty
-            ? null
-            : _specialRequestsController.text.trim(),
-        paymentMethod: _selectedPaymentMethod,
-        usePickupService: _usePickupService,
-        quantity: hasNewPricing ? (int.tryParse(_selectedPriceOption!) ?? 0) : null,
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Booking submitted successfully!')),
-      );
 
       widget.onBookingComplete();
     } catch (e) {

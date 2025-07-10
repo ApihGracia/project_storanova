@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'cust_profile.dart' as cust;
-import 'owner_profile.dart' as owner;
+import 'owner_dashboard.dart';
+import 'cust_dashboard.dart';
 
 class ProfileValidator {
   static Future<bool> isCustomerProfileComplete() async {
@@ -116,16 +116,20 @@ class ProfileValidator {
 
   static void _navigateToProfile(BuildContext context, {required bool isOwner}) {
     if (isOwner) {
-      // Navigate to owner profile page
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const owner.ProfileScreen()),
+      // Navigate to owner dashboard with profile tab selected (index 3)
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => const OwnerHomePage(initialTabIndex: 3),
+        ),
+        (route) => false,
       );
     } else {
-      // Navigate to customer profile page
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const cust.ProfileScreen()),
+      // Navigate to customer dashboard with profile tab selected (index 3)
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (context) => const CustHomePage(initialTabIndex: 3),
+        ),
+        (route) => false,
       );
     }
   }

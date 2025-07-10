@@ -3,7 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'database.dart';
 import 'shared_widgets.dart';
-import 'owner_customer_list.dart';
+import 'owner_dashboard.dart';
+import 'cust_dashboard.dart';
 
 class NotificationsPage extends StatefulWidget {
   final String? expectedRole; // Optional hint about user role
@@ -901,13 +902,16 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          // Mark as read and navigate to applications page
+                          // Mark as read and close dialog
                           widget.onMarkAsRead(widget.notification['id']);
-                          Navigator.of(context).pop();
-                          // Navigate to customer list page
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(builder: (context) => const OwnerCustomerListPage()),
+                          Navigator.of(context).pop(); // Close dialog
+                          
+                          // Navigate back to owner dashboard and switch to applications tab (index 1)
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (context) => const OwnerHomePage(initialTabIndex: 1),
+                            ),
+                            (route) => false,
                           );
                         },
                         icon: const Icon(Icons.assignment),
@@ -932,11 +936,17 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          // Mark as read and navigate to booking page for payment
+                          // Mark as read and close dialog
                           widget.onMarkAsRead(widget.notification['id']);
-                          Navigator.of(context).pop();
-                          // Navigate to customer dashboard where they can complete payment
-                          Navigator.pushReplacementNamed(context, '/customer_dashboard');
+                          Navigator.of(context).pop(); // Close dialog
+                          
+                          // Navigate back to customer dashboard (bookings tab is index 0)
+                          Navigator.of(context).pushAndRemoveUntil(
+                            MaterialPageRoute(
+                              builder: (context) => const CustHomePage(initialTabIndex: 0),
+                            ),
+                            (route) => false,
+                          );
                         },
                         icon: const Icon(Icons.payment),
                         label: const Text('Complete Payment'),

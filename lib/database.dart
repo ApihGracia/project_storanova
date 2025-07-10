@@ -842,7 +842,7 @@ class DatabaseService {
     required String customerUsername,
     required String ownerUsername,
     required String houseId,
-    required String houseName, // This now stores the address
+    required String houseAddress, // Changed from houseName to houseAddress
     required DateTime checkIn,
     required DateTime checkOut,
     required double totalPrice,
@@ -865,8 +865,8 @@ class DatabaseService {
       'customerUsername': customerUsername,
       'ownerUsername': ownerUsername,
       'houseId': houseId,
-      'houseAddress': houseName, // Store as houseAddress in the database
-      'houseName': houseName, // Keep for backward compatibility
+      'houseAddress': houseAddress, // Store the house address
+      'houseName': houseAddress, // Keep for backward compatibility
       'checkIn': checkIn.toIso8601String(),
       'checkOut': checkOut.toIso8601String(),
       'totalPrice': totalPrice,
@@ -886,7 +886,7 @@ class DatabaseService {
     await addNotification(
       username: customerUsername,
       title: 'Booking Submitted',
-      message: 'Your booking for $houseName has been submitted and is waiting for owner review.',
+      message: 'Your booking for $houseAddress has been submitted and is waiting for owner review.',
       type: 'booking',
       relatedDocumentId: bookingId,
     );
@@ -895,7 +895,7 @@ class DatabaseService {
     await addNotification(
       username: ownerUsername,
       title: 'New Booking Request',
-      message: 'You have a new booking request for $houseName from $customerUsername.',
+      message: 'You have a new booking request for $houseAddress from $customerUsername.',
       type: 'booking',
       relatedDocumentId: bookingId,
     );

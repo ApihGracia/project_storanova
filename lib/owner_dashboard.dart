@@ -59,19 +59,22 @@ class House {
 }
 
 class OwnerHomePage extends StatefulWidget {
-  const OwnerHomePage({Key? key}) : super(key: key);
+  final int initialTabIndex;
+  
+  const OwnerHomePage({Key? key, this.initialTabIndex = 0}) : super(key: key);
 
   @override
   _OwnerHomePageState createState() => _OwnerHomePageState();
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 0;
+  late int _currentIndex;
   String? _username;
 
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTabIndex; // Use the provided initial tab index
     _loadUsername();
   }
 
@@ -201,12 +204,12 @@ class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
           final isUserBanned = userData['isBanned'] == true;
           
           if (isUserBanned) {
-            // Redirect to notifications page
-            Navigator.pushReplacement(
-              context,
+            // Navigate to notifications page with proper navigation
+            Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(
                 builder: (context) => NotificationsPage(expectedRole: 'owner'),
               ),
+              (route) => false,
             );
             return;
           }

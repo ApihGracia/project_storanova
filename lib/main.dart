@@ -489,7 +489,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'Smart Storage Solutions',
+                                'Store Smarter. Work Faster.',
                                 style: TextStyle(
                                   fontSize: 18,
                                   color: Colors.white.withOpacity(0.95),

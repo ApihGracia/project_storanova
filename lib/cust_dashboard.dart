@@ -10,19 +10,22 @@ import 'cust_profile.dart' as cust;
 
 
 class CustHomePage extends StatefulWidget {
-  const CustHomePage({Key? key}) : super(key: key);
+  final int initialTabIndex;
+  
+  const CustHomePage({Key? key, this.initialTabIndex = 0}) : super(key: key);
 
   @override
   _CustHomePageState createState() => _CustHomePageState();
 }
 
 class _CustHomePageState extends State<CustHomePage> {
-  int _currentIndex = 0;
+  late int _currentIndex;
   String? _username;
 
   @override
   void initState() {
     super.initState();
+    _currentIndex = widget.initialTabIndex; // Use the provided initial tab index
     _loadUsername();
   }
 
@@ -97,6 +100,17 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
   bool _isBookingsIndexBuilding = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  
+  // Booking editing state
+  bool _isEditingBooking = false;
+  final _bookingFormKey = GlobalKey<FormState>();
+  final TextEditingController _quantityController = TextEditingController();
+  final TextEditingController _specialRequestsController = TextEditingController();
+  DateTime? _editingCheckIn;
+  DateTime? _editingCheckOut;
+  String? _editingPaymentMethod;
+  bool _editingUsePickupService = false;
+  Map<String, dynamic>? _currentHouse;
 
   @override
   void initState() {
@@ -109,6 +123,8 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
   @override
   void dispose() {
     _searchController.dispose();
+    _quantityController.dispose();
+    _specialRequestsController.dispose();
     super.dispose();
   }
 
@@ -122,12 +138,12 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
           final isUserBanned = userData['isBanned'] == true;
           
           if (isUserBanned) {
-            // Redirect to notifications page
-            Navigator.pushReplacement(
-              context,
+            // Navigate to notifications page with proper navigation
+            Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(
                 builder: (context) => NotificationsPage(expectedRole: 'customer'),
               ),
+              (route) => false,
             );
             return;
           }
@@ -169,23 +185,6 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
     );
   }
 
-  Future<void> _editBooking(Map<String, dynamic> booking) async {
-    // For now, show a simple dialog to inform user about editing
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Booking'),
-        content: Text('Editing bookings will be available soon. You can currently delete the booking for ${booking['houseAddress'] ?? 'this address'} and create a new one.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _deleteBooking(Map<String, dynamic> booking) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -218,6 +217,109 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
           SnackBar(content: Text('Error deleting booking: $e')),
         );
       }
+    }
+  }
+
+  // In-place booking editing methods
+  void _startEditingBooking(Map<String, dynamic> booking, Map<String, dynamic> house) {
+    setState(() {
+      _isEditingBooking = true;
+      _currentHouse = house;
+      
+      // Initialize editing values with current booking data
+      _quantityController.text = booking['quantity']?.toString() ?? '';
+      _specialRequestsController.text = booking['specialRequests']?.toString() ?? '';
+      _editingCheckIn = booking['checkIn']?.toDate();
+      _editingCheckOut = booking['checkOut']?.toDate();
+      _editingPaymentMethod = booking['paymentMethod']?.toString();
+      _editingUsePickupService = booking['usePickupService'] == true;
+    });
+  }
+
+  void _cancelEditingBooking() {
+    setState(() {
+      _isEditingBooking = false;
+      _currentHouse = null;
+      
+      // Clear controllers
+      _quantityController.clear();
+      _specialRequestsController.clear();
+      _editingCheckIn = null;
+      _editingCheckOut = null;
+      _editingPaymentMethod = null;
+      _editingUsePickupService = false;
+    });
+  }
+
+  Future<void> _saveBookingChanges(Map<String, dynamic> booking) async {
+    if (!_bookingFormKey.currentState!.validate()) {
+      return;
+    }
+
+    try {
+      // Create updated booking data
+      final updatedBooking = Map<String, dynamic>.from(booking);
+      
+      if (_quantityController.text.isNotEmpty) {
+        updatedBooking['quantity'] = int.parse(_quantityController.text);
+      }
+      updatedBooking['specialRequests'] = _specialRequestsController.text;
+      if (_editingCheckIn != null) {
+        updatedBooking['checkIn'] = Timestamp.fromDate(_editingCheckIn!);
+      }
+      if (_editingCheckOut != null) {
+        updatedBooking['checkOut'] = Timestamp.fromDate(_editingCheckOut!);
+      }
+      if (_editingPaymentMethod != null) {
+        updatedBooking['paymentMethod'] = _editingPaymentMethod;
+      }
+      updatedBooking['usePickupService'] = _editingUsePickupService;
+
+      // Recalculate pricing
+      if (_currentHouse != null) {
+        final house = _currentHouse!;
+        double basePrice = 0;
+        int quantity = int.tryParse(_quantityController.text) ?? 1;
+        
+        if (_editingCheckIn != null && _editingCheckOut != null) {
+          final days = _editingCheckOut!.difference(_editingCheckIn!).inDays;
+          
+          if (house['pricePerItem'] != null) {
+            basePrice = (house['pricePerItem'] as num).toDouble() * quantity * days;
+          } else if (house['prices'] != null && (house['prices'] as List).isNotEmpty) {
+            final prices = house['prices'] as List;
+            basePrice = (prices.first['price'] as num).toDouble() * quantity * days;
+          }
+        }
+
+        double pickupCost = 0;
+        if (_editingUsePickupService && house['offerPickupService'] == true) {
+          pickupCost = double.tryParse(house['pickupServiceCost']?.toString() ?? '50') ?? 50;
+        }
+
+        final totalPrice = basePrice + pickupCost;
+        updatedBooking['totalPrice'] = totalPrice;
+        updatedBooking['priceBreakdown'] = 'Base: RM$basePrice${pickupCost > 0 ? ', Pickup: RM$pickupCost' : ''}';
+      }
+
+      // Update in Firestore
+      await FirebaseFirestore.instance
+          .collection('Bookings')
+          .doc(booking['id'])
+          .update(updatedBooking);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Booking updated successfully')),
+      );
+
+      // Refresh bookings and exit edit mode
+      _loadBookings();
+      _cancelEditingBooking();
+      
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating booking: $e')),
+      );
     }
   }
 
@@ -395,122 +497,138 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
       }
     }
 
+    // Get available payment methods for the house
+    List<String> _getAvailablePaymentMethods(Map<String, dynamic>? house) {
+      if (house == null) return ['Cash'];
+      
+      final paymentMethods = house['paymentMethods'] as Map<String, dynamic>? ?? {};
+      List<String> availableMethods = [];
+
+      if (paymentMethods['cash'] == true) availableMethods.add('Cash');
+      if (paymentMethods['online_banking'] == true) availableMethods.add('Online Banking');
+      if (paymentMethods['ewallet'] == true) availableMethods.add('E-Wallet');
+
+      return availableMethods.isEmpty ? ['Cash'] : availableMethods;
+    }
+
+    // Date picker helper
+    Future<void> _selectDate(bool isCheckIn) async {
+      final DateTime? picked = await showDatePicker(
+        context: context,
+        initialDate: isCheckIn 
+            ? (_editingCheckIn ?? DateTime.now())
+            : (_editingCheckOut ?? DateTime.now().add(const Duration(days: 1))),
+        firstDate: DateTime.now(),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+      );
+
+      if (picked != null) {
+        setState(() {
+          if (isCheckIn) {
+            _editingCheckIn = picked;
+            if (_editingCheckOut != null && _editingCheckOut!.isBefore(picked.add(const Duration(days: 1)))) {
+              _editingCheckOut = null;
+            }
+          } else {
+            _editingCheckOut = picked;
+          }
+        });
+      }
+    }
+
+    // Fetch house data for editing
+    Future<Map<String, dynamic>?> _fetchHouseData() async {
+      try {
+        Map<String, dynamic>? house;
+        
+        // First try to get house by ID
+        if (booking['houseId'] != null) {
+          final houseDoc = await FirebaseFirestore.instance
+              .collection('Houses')
+              .doc(booking['houseId'])
+              .get();
+          
+          if (houseDoc.exists) {
+            house = houseDoc.data();
+            house!['id'] = houseDoc.id;
+          }
+        }
+        
+        // If no house found by ID, try to find by owner and address
+        if (house == null && booking['ownerUsername'] != null && booking['houseAddress'] != null) {
+          final housesSnapshot = await FirebaseFirestore.instance
+              .collection('Houses')
+              .where('ownerUsername', isEqualTo: booking['ownerUsername'])
+              .where('address', isEqualTo: booking['houseAddress'])
+              .limit(1)
+              .get();
+          
+          if (housesSnapshot.docs.isNotEmpty) {
+            house = housesSnapshot.docs.first.data();
+            house['id'] = housesSnapshot.docs.first.id;
+          }
+        }
+        
+        return house;
+      } catch (e) {
+        return null;
+      }
+    }
+
     showDialog(
       context: context,
       builder: (ctx) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
-            padding: const EdgeInsets.all(20.0),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Booking Details',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  
-                  // House Information
-                  _buildDetailRow('Address', booking['houseAddress'] ?? 'No Address'),
-                  _buildDetailRow('Owner', booking['ownerUsername'] ?? 'N/A'),
-                  
-                  // Booking Status - aligned with other details
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Row(
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+                padding: const EdgeInsets.all(20.0),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: _bookingFormKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: 130,
-                          child: Text(
-                            'Status',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Booking Details',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                if (_isEditingBooking) {
+                                  _cancelEditingBooking();
+                                }
+                                Navigator.pop(ctx);
+                              },
+                            ),
+                          ],
                         ),
-                        const Text(
-                          ': ',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _getBookingStatusColor(booking['status']),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: _getBookingStatusTextColor(booking['status'])),
-                          ),
+                        const Divider(),
+                        const SizedBox(height: 12),
+                        
+                        // House Information
+                        _buildDetailRow('Address', booking['houseAddress'] ?? 'No Address'),
+                        _buildDetailRow('Owner', booking['ownerUsername'] ?? 'N/A'),
+                        
+                        // Booking Status
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
                           child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _getBookingStatusIcon(booking['status']),
-                                size: 16,
-                                color: _getBookingStatusTextColor(booking['status']),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                booking['status']?.toString().toUpperCase() ?? 'UNKNOWN',
-                                style: TextStyle(
-                                  color: _getBookingStatusTextColor(booking['status']),
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // Dates
-                  _buildDetailRow('Store Date', formatDate(booking['checkIn'])),
-                  _buildDetailRow('Pickup Date', formatDate(booking['checkOut'])),
-                  
-                  // Quantity and Service Details
-                  if (booking['quantity'] != null)
-                    _buildDetailRow('Quantity', '${booking['quantity']} items'),
-                  if (booking['usePickupService'] == true)
-                    _buildDetailRow('Pickup Service', 'Yes'),
-                  
-                  // Pricing Details
-                  if (booking['priceBreakdown'] != null)
-                    _buildDetailRow('Price Breakdown', booking['priceBreakdown'].toString()),
-                  _buildDetailRow('Total Price', 'RM${booking['totalPrice']?.toString() ?? '0'}'),
-                  
-                  // Payment Details
-                  if (booking['paymentMethod'] != null)
-                    _buildDetailRow('Payment Method', booking['paymentMethod'].toString()),
-                  
-                  // Special Requests - aligned with other details
-                  if (booking['specialRequests'] != null && booking['specialRequests'].toString().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               SizedBox(
                                 width: 130,
                                 child: Text(
-                                  'Special Requests',
+                                  'Status',
                                   style: const TextStyle(fontWeight: FontWeight.bold),
                                 ),
                               ),
@@ -518,67 +636,294 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                                 ': ',
                                 style: TextStyle(fontWeight: FontWeight.bold),
                               ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _getBookingStatusColor(booking['status']),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: _getBookingStatusTextColor(booking['status'])),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _getBookingStatusIcon(booking['status']),
+                                      size: 16,
+                                      color: _getBookingStatusTextColor(booking['status']),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      booking['status']?.toString().toUpperCase() ?? 'UNKNOWN',
+                                      style: TextStyle(
+                                        color: _getBookingStatusTextColor(booking['status']),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ],
                           ),
+                        ),
+                        
+                        // Store Date - Editable in edit mode
+                        if (_isEditingBooking) ...[
+                          const Text('Store Date:', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: Text(
-                              booking['specialRequests'].toString(),
-                              style: const TextStyle(fontSize: 14),
+                          InkWell(
+                            onTap: () => _selectDate(true),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.calendar_today),
+                                  const SizedBox(width: 8),
+                                  Text(_editingCheckIn != null 
+                                      ? formatDate(Timestamp.fromDate(_editingCheckIn!))
+                                      : 'Select date'),
+                                ],
+                              ),
                             ),
                           ),
+                          const SizedBox(height: 12),
+                        ] else 
+                          _buildDetailRow('Store Date', formatDate(booking['checkIn'])),
+                        
+                        // Pickup Date - Editable in edit mode
+                        if (_isEditingBooking) ...[
+                          const Text('Pickup Date:', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          InkWell(
+                            onTap: () => _selectDate(false),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.calendar_today),
+                                  const SizedBox(width: 8),
+                                  Text(_editingCheckOut != null 
+                                      ? formatDate(Timestamp.fromDate(_editingCheckOut!))
+                                      : 'Select date'),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ] else 
+                          _buildDetailRow('Pickup Date', formatDate(booking['checkOut'])),
+                        
+                        // Quantity - Editable in edit mode
+                        if (booking['quantity'] != null) ...[
+                          if (_isEditingBooking) ...[
+                            const Text('Quantity:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            TextFormField(
+                              controller: _quantityController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                suffixText: 'items',
+                              ),
+                              validator: (value) {
+                                if (value == null || value.isEmpty) return 'Please enter quantity';
+                                final quantity = int.tryParse(value);
+                                if (quantity == null || quantity <= 0) return 'Please enter a valid quantity';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                          ] else 
+                            _buildDetailRow('Quantity', '${booking['quantity']} items'),
                         ],
-                      ),
-                    ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // Action Buttons (if pending)
-                  if (booking['status']?.toLowerCase() == 'pending') ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _editBooking(booking);
+                        
+                        // Pickup Service - Editable in edit mode
+                        if (_currentHouse?['offerPickupService'] == true && _isEditingBooking) ...[
+                          CheckboxListTile(
+                            title: const Text('Use Pickup Service'),
+                            subtitle: Text('Additional cost: RM${_currentHouse?['pickupServiceCost'] ?? '50'}'),
+                            value: _editingUsePickupService,
+                            onChanged: (value) {
+                              setDialogState(() {
+                                _editingUsePickupService = value ?? false;
+                              });
                             },
-                            icon: const Icon(Icons.edit),
-                            label: const Text('Edit Booking'),
+                            dense: true,
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _deleteBooking(booking);
+                          const SizedBox(height: 12),
+                        ] else if (booking['usePickupService'] == true)
+                          _buildDetailRow('Pickup Service', 'Yes'),
+                        
+                        // Payment Method - Editable in edit mode
+                        if (_isEditingBooking && _currentHouse != null) ...[
+                          const Text('Payment Method:', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                            ),
+                            value: _editingPaymentMethod,
+                            items: _getAvailablePaymentMethods(_currentHouse).map<DropdownMenuItem<String>>((method) {
+                              return DropdownMenuItem(value: method, child: Text(method));
+                            }).toList(),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                _editingPaymentMethod = value;
+                              });
                             },
-                            icon: const Icon(Icons.delete),
-                            label: const Text('Delete'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
+                            validator: (value) => value == null ? 'Please select a payment method' : null,
+                          ),
+                          const SizedBox(height: 12),
+                        ] else if (booking['paymentMethod'] != null)
+                          _buildDetailRow('Payment Method', booking['paymentMethod'].toString()),
+                        
+                        // Pricing Details
+                        if (booking['priceBreakdown'] != null)
+                          _buildDetailRow('Price Breakdown', booking['priceBreakdown'].toString()),
+                        _buildDetailRow('Total Price', 'RM${booking['totalPrice']?.toString() ?? '0'}'),
+                        
+                        // Special Requests - Editable in edit mode
+                        if (_isEditingBooking) ...[
+                          const Text('Special Requests:', style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _specialRequestsController,
+                            maxLines: 3,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              hintText: 'Any special requests or notes...',
                             ),
                           ),
-                        ),
+                          const SizedBox(height: 20),
+                        ] else if (booking['specialRequests'] != null && booking['specialRequests'].toString().isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: 130,
+                                      child: Text(
+                                        'Special Requests',
+                                        style: const TextStyle(fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    const Text(
+                                      ': ',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: Text(
+                                    booking['specialRequests'].toString(),
+                                    style: const TextStyle(fontSize: 14),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                        
+                        // Action Buttons
+                        if (booking['status']?.toLowerCase() == 'pending') ...[
+                          if (!_isEditingBooking) ...[
+                            // View mode buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final house = await _fetchHouseData();
+                                      if (house != null) {
+                                        _startEditingBooking(booking, house);
+                                        setDialogState(() {});
+                                      } else {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Could not load house data for editing')),
+                                        );
+                                      }
+                                    },
+                                    icon: const Icon(Icons.edit),
+                                    label: const Text('Edit'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      _deleteBooking(booking);
+                                    },
+                                    icon: const Icon(Icons.delete),
+                                    label: const Text('Delete'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ] else ...[
+                            // Edit mode buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton(
+                                    onPressed: () {
+                                      _cancelEditingBooking();
+                                      setDialogState(() {});
+                                    },
+                                    child: const Text('Cancel'),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton(
+                                    onPressed: () async {
+                                      await _saveBookingChanges(booking);
+                                      Navigator.pop(ctx);
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('Save Changes'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                        ],
                       ],
                     ),
-                    const SizedBox(height: 12),
-                  ],
-                  
-
-                ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -733,7 +1078,7 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                                         return [
                                           IconButton(
                                             icon: const Icon(Icons.edit, size: 18),
-                                            onPressed: () => _editBooking(booking),
+                                            onPressed: () => _showBookingDetails(context, booking),
                                             tooltip: 'Edit booking',
                                             padding: const EdgeInsets.all(4),
                                             constraints: const BoxConstraints(),
