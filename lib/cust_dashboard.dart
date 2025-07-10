@@ -664,47 +664,55 @@ class _CustHomePageState extends State<CustHomePage> {
                                   ),
                                 ),
                                 // Action buttons based on booking status
-                                ...(() {
-                                  if (isPending) {
-                                    return [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit, size: 18),
-                                        onPressed: () => _editBooking(booking),
-                                        tooltip: 'Edit booking',
-                                        padding: const EdgeInsets.all(4),
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                                        onPressed: () => _deleteBooking(booking),
-                                        tooltip: 'Delete booking',
-                                        padding: const EdgeInsets.all(4),
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                    ];
-                                  } else if (booking['status']?.toLowerCase() == 'approved' && 
-                                            booking['paymentStatus']?.toLowerCase() != 'completed' &&
-                                            booking['paymentMethod']?.toLowerCase() != 'cash') {
-                                    return [
-                                      ElevatedButton.icon(
-                                        onPressed: () => _showPaymentDialog(booking),
-                                        icon: const Icon(Icons.payment, size: 16),
-                                        label: const Text('Pay Now', style: TextStyle(fontSize: 12)),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.orange,
-                                          foregroundColor: Colors.white,
-                                          minimumSize: const Size(80, 32),
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                        ),
-                                      ),
-                                    ];
-                                  } else {
-                                    return <Widget>[];
-                                  }
-                                })(),
+                                Flexible(
+                                  fit: FlexFit.loose,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      ...(() {
+                                        if (isPending) {
+                                          return [
+                                            IconButton(
+                                              icon: const Icon(Icons.edit, size: 18),
+                                              onPressed: () => _editBooking(booking),
+                                              tooltip: 'Edit booking',
+                                              padding: const EdgeInsets.all(4),
+                                              constraints: const BoxConstraints(),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                              onPressed: () => _deleteBooking(booking),
+                                              tooltip: 'Delete booking',
+                                              padding: const EdgeInsets.all(4),
+                                              constraints: const BoxConstraints(),
+                                            ),
+                                          ];
+                                        } else if (booking['status']?.toLowerCase() == 'approved' && 
+                                                  booking['paymentStatus']?.toLowerCase() != 'completed' &&
+                                                  booking['paymentMethod']?.toLowerCase() != 'cash') {
+                                          return [
+                                            ElevatedButton.icon(
+                                              onPressed: () => _showPaymentDialog(booking),
+                                              icon: const Icon(Icons.payment, size: 16),
+                                              label: const Text('Pay Now', style: TextStyle(fontSize: 12)),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.orange,
+                                                foregroundColor: Colors.white,
+                                                minimumSize: const Size(80, 32),
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                              ),
+                                            ),
+                                          ];
+                                        } else {
+                                          return <Widget>[];
+                                        }
+                                      })(),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -794,32 +802,38 @@ class _CustHomePageState extends State<CustHomePage> {
                   'Available Houses',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                Row(
-                  children: [
-                    const Text('Sort by: '),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.transparent,
+                Flexible(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Sort by: '),
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 180),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade300),
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.transparent,
+                        ),
+                        child: DropdownButton<String>(
+                          value: _sortBy,
+                          isDense: true,
+                          isExpanded: false,
+                          underline: Container(), // Remove underline
+                          dropdownColor: Colors.white,
+                          style: const TextStyle(color: Colors.black87),
+                          icon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                          items: const [
+                            DropdownMenuItem(value: 'perDay', child: Text('Price (Low to High)')),
+                            DropdownMenuItem(value: 'perWeek', child: Text('Price (High to Low)')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) setState(() => _sortBy = value);
+                          },
+                        ),
                       ),
-                      child: DropdownButton<String>(
-                        value: _sortBy,
-                        underline: Container(), // Remove underline
-                        dropdownColor: Colors.white,
-                        style: const TextStyle(color: Colors.black87),
-                        icon: const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                        items: const [
-                          DropdownMenuItem(value: 'perDay', child: Text('Price (Low to High)')),
-                          DropdownMenuItem(value: 'perWeek', child: Text('Price (High to Low)')),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) setState(() => _sortBy = value);
-                        },
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
