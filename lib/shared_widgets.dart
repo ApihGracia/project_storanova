@@ -2,14 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
-import 'notifications_page.dart';
-import 'cust_dashboard.dart';
-import 'cust_profile.dart' as cust;
-import 'cust_wishlist.dart';
 import 'cust_booking_history.dart';
-import 'owner_dashboard.dart';
-import 'owner_customer_list.dart';
-import 'owner_profile.dart' as owner;
 import 'database.dart';
 
 // Common logout method
@@ -126,11 +119,13 @@ class _NotificationCounterState extends State<NotificationCounter> {
 class CustomerAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final bool showBackButton;
+  final bool showMenuIcon;
 
   const CustomerAppBar({
     Key? key,
     required this.title,
     this.showBackButton = false,
+    this.showMenuIcon = true,
   }) : super(key: key);
 
   @override
@@ -142,7 +137,7 @@ class CustomerAppBar extends StatelessWidget implements PreferredSizeWidget {
       elevation: 2,
       title: Text(title, style: const TextStyle(color: Colors.white)),
       centerTitle: true,
-      actions: [
+      actions: showMenuIcon ? [
         Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -151,7 +146,7 @@ class CustomerAppBar extends StatelessWidget implements PreferredSizeWidget {
             },
           ),
         ),
-      ],
+      ] : null,
     );
   }
 
@@ -227,37 +222,7 @@ class CustomerNavBar extends StatelessWidget {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
-      onTap: (index) {
-        if (index == currentIndex) return;
-        
-        switch (index) {
-          case 0: // Home
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const CustHomePage()),
-            );
-            break;
-          case 1: // Wishlist
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const CustWishlistPage()),
-            );
-            break;
-          case 2: // Notifications
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsPage(expectedRole: 'customer')),
-            );
-            break;
-          case 3: // Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const cust.ProfileScreen()),
-            );
-            break;
-        }
-        onTap(index);
-      },
+      onTap: onTap,
       backgroundColor: const Color(0xFF1976D2), // Darker blue
       selectedItemColor: const Color(0xFF0D47A1), // Dark blue for selected
       unselectedItemColor: const Color(0xFFBBDEFB), // Light blue for unselected
@@ -375,37 +340,7 @@ class OwnerNavBar extends StatelessWidget {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
-      onTap: (index) {
-        if (index == currentIndex) return;
-        
-        switch (index) {
-          case 0: // Home
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const OwnerHomePage()),
-            );
-            break;
-          case 1: // Customer List
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const OwnerCustomerListPage()),
-            );
-            break;
-          case 2: // Notifications
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsPage(expectedRole: 'owner')),
-            );
-            break;
-          case 3: // Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const owner.ProfileScreen()),
-            );
-            break;
-        }
-        onTap(index);
-      },
+      onTap: onTap,
       backgroundColor: const Color(0xFF1976D2), // Darker blue
       selectedItemColor: const Color(0xFF0D47A1), // Dark blue for selected
       unselectedItemColor: const Color(0xFFBBDEFB), // Light blue

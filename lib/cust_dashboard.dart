@@ -5,18 +5,9 @@ import 'database.dart';
 import 'notifications_page.dart';
 import 'shared_widgets.dart';
 import 'house_details_dialog.dart';
+import 'cust_wishlist.dart';
+import 'cust_profile.dart' as cust;
 
-class CustDashboard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Customer Dashboard')),
-      body: const Center(
-        child: Text('Welcome to the Customer Dashboard!'),
-      ),
-    );
-  }
-}
 
 class CustHomePage extends StatefulWidget {
   const CustHomePage({Key? key}) : super(key: key);
@@ -26,7 +17,79 @@ class CustHomePage extends StatefulWidget {
 }
 
 class _CustHomePageState extends State<CustHomePage> {
-  int _currentIndex = 0; // Start at "Home"
+  int _currentIndex = 0;
+  String? _username;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsername();
+  }
+
+  Future<void> _loadUsername() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    
+    final usersSnapshot = await FirebaseFirestore.instance
+        .collection('AppUsers')
+        .where('email', isEqualTo: user.email)
+        .limit(1)
+        .get();
+    
+    if (usersSnapshot.docs.isNotEmpty && mounted) {
+      setState(() {
+        _username = usersSnapshot.docs.first.id;
+      });
+    }
+  }
+
+  String _getPageTitle(int index) {
+    switch (index) {
+      case 0:
+        return 'StoraNova';
+      case 1:
+        return 'Wishlist';
+      case 2:
+        return 'Notifications';
+      case 3:
+        return _username != null ? '@$_username' : 'Profile';
+      default:
+        return 'StoraNova';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: CustomerAppBar(title: _getPageTitle(_currentIndex)),
+      endDrawer: const CustomerDrawer(),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          CustDashboardContent(),
+          CustWishlistPage(isEmbedded: true),
+          NotificationsPage(expectedRole: 'customer', isEmbedded: true),
+          cust.ProfileScreen(isEmbedded: true),
+        ],
+      ),
+      bottomNavigationBar: CustomerNavBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+      ),
+    );
+  }
+}
+
+class CustDashboardContent extends StatefulWidget {
+  @override
+  _CustDashboardContentState createState() => _CustDashboardContentState();
+}
+
+class _CustDashboardContentState extends State<CustDashboardContent> {
   String _sortBy = 'perDay'; // 'perDay' or 'perWeek'
   late Future<List<Map<String, dynamic>>> _housesFuture;
   final DatabaseService _db = DatabaseService();
@@ -578,14 +641,11 @@ class _CustHomePageState extends State<CustHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: CustomerAppBar(title: 'StoraNova'),
-      endDrawer: const CustomerDrawer(),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
             // Show bookings at the top if any exist
             if (_bookings.isNotEmpty) ...[
               const Text(
@@ -928,6 +988,7 @@ class _CustHomePageState extends State<CustHomePage> {
                       final house = sortedHouses[idx];
                       return Card(
                         elevation: 2,
+                        color: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
@@ -1022,14 +1083,7 @@ class _CustHomePageState extends State<CustHomePage> {
             ),
           ],
         ),
-      ),
-      bottomNavigationBar: CustomerNavBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() => _currentIndex = index);
-        },
-      ),
-    );
+      );
   }
 
   Future<List<Map<String, dynamic>>> _fetchHouses() async {

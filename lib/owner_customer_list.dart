@@ -5,7 +5,9 @@ import 'shared_widgets.dart';
 import 'database.dart';
 
 class OwnerCustomerListPage extends StatefulWidget {
-  const OwnerCustomerListPage({Key? key}) : super(key: key);
+  final bool isEmbedded; // Whether this is embedded in another Scaffold
+  
+  const OwnerCustomerListPage({Key? key, this.isEmbedded = false}) : super(key: key);
 
   @override
   State<OwnerCustomerListPage> createState() => _OwnerCustomerListPageState();
@@ -338,43 +340,50 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
   // Build storage status dropdown
   Widget _buildStorageStatusDropdown(Map<String, dynamic> booking, {bool isCompact = false}) {
     final currentStatus = booking['storageStatus'] ?? 'not_stored';
-    final fontSize = isCompact ? 10.0 : 12.0; // Increased from 9.0 for better readability
-    final iconSize = isCompact ? 14.0 : 16.0; // Increased from 12.0
+    final fontSize = isCompact ? 12.0 : 14.0; // Increased from 10.0 and 12.0
+    final iconSize = isCompact ? 16.0 : 18.0; // Increased from 14.0 and 16.0
     final padding = isCompact 
         ? const EdgeInsets.symmetric(horizontal: 6, vertical: 2) // Increased padding slightly
         : const EdgeInsets.symmetric(horizontal: 8, vertical: 4);
     
+    // Check if this is a cash payment that hasn't been received yet
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final cashReceived = booking['cashReceived'] ?? false;
+    final isDisabled = paymentMethod == 'cash' && !cashReceived;
+    
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: _getStorageStatusColor(currentStatus),
+        color: isDisabled ? Colors.grey.shade100 : _getStorageStatusColor(currentStatus),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _getStorageStatusTextColor(currentStatus)),
+        border: Border.all(color: isDisabled ? Colors.grey.shade300 : _getStorageStatusTextColor(currentStatus)),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
+          Flexible(
             child: Text(
               isCompact ? (currentStatus == 'picked_up' ? 'Picked' : (currentStatus == 'stored' ? 'Stored' : 'None')) : _getStorageDisplayText(currentStatus),
               style: TextStyle(
                 fontSize: fontSize,
-                color: _getStorageStatusTextColor(currentStatus),
+                color: isDisabled ? Colors.grey.shade500 : _getStorageStatusTextColor(currentStatus),
                 fontWeight: FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          const SizedBox(width: 2), // Small spacing between text and icon
           DropdownButton<String>(
             value: currentStatus,
             underline: Container(),
             icon: Icon(
               Icons.arrow_drop_down,
               size: iconSize,
-              color: _getStorageStatusTextColor(currentStatus),
+              color: isDisabled ? Colors.grey.shade400 : _getStorageStatusTextColor(currentStatus),
             ),
             isDense: true,
-            items: isCompact ? [
+            items: isDisabled ? null : (isCompact ? [
               DropdownMenuItem(
                 value: 'not_stored',
                 child: Text('None', style: TextStyle(fontSize: fontSize)),
@@ -400,8 +409,8 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                 value: 'picked_up',
                 child: Text('Picked Up', style: TextStyle(fontSize: fontSize)),
               ),
-            ],
-            onChanged: (String? newStatus) {
+            ]),
+            onChanged: isDisabled ? null : (String? newStatus) {
               if (newStatus != null && newStatus != currentStatus) {
                 _updateStorageStatus(booking['id'], newStatus);
               }
@@ -583,7 +592,13 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
   // Show booking details dialog
   void _showBookingDetails(Map<String, dynamic> booking) {
     final bool isPendingApplication = booking['status']?.toString().toLowerCase() == 'pending';
-    final bool isApprovedApplication = booking['status']?.toString().toLowerCase() == 'approved';
+    final status = booking['status']?.toString().toLowerCase();
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+    
+    // Determine if this is an approved application that still needs payment handling
+    final bool isApprovedApplication = status == 'approved' || 
+        (status == 'approved' && paymentMethod != 'cash' && paymentStatus != 'completed');
     
     // Helper function to format date
     String formatDate(dynamic date) {
@@ -649,6 +664,20 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                       }
                     },
                   ),
+                  // Customer Phone Number
+                  FutureBuilder<String?>(
+                    future: _getCustomerPhone(booking['customerUsername']),
+                    builder: (context, snapshot) {
+                      final customerPhone = snapshot.data;
+                      if (customerPhone != null && customerPhone.isNotEmpty) {
+                        return _buildDetailRow('Phone', customerPhone);
+                      } else if (snapshot.connectionState == ConnectionState.waiting) {
+                        return _buildDetailRow('Phone', 'Loading...');
+                      } else {
+                        return _buildDetailRow('Phone', 'Not set');
+                      }
+                    },
+                  ),
                   _buildDetailRow('House Address', booking['houseAddress'] ?? 'No Address'),
                   
                   // Booking Status
@@ -706,8 +735,6 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                   // Payment Details
                   if (booking['paymentMethod'] != null)
                     _buildDetailRow('Payment Method', booking['paymentMethod'].toString()),
-                  if (booking['paymentStatus'] != null)
-                    _buildDetailRow('Payment Status', booking['paymentStatus'].toString()),
                   
                   // Storage Status (only for completed bookings in customer list)
                   if (!isPendingApplication && !isApprovedApplication)
@@ -795,35 +822,11 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                       ],
                     ),
                   ] else if (isApprovedApplication) ...[
-                    // For approved applications waiting for payment
+                    // For approved applications - show different messages based on payment method and status
                     const SizedBox(height: 20),
                     const Divider(),
                     const SizedBox(height: 16),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.shade300),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.payment, color: Colors.blue.shade700, size: 24),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              'Application approved. Waiting for customer payment.',
-                              style: TextStyle(
-                                color: Colors.blue.shade700,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    _buildApprovedApplicationWidget(booking),
                   ],
                 ],
               ),
@@ -893,7 +896,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
               child: Text(
                 '#$customerIndex',
                 style: const TextStyle(
-                  fontSize: 12, // Increased from 10
+                  fontSize: 14, // Increased from 12
                   color: Colors.black, // Changed from grey to black
                   fontWeight: FontWeight.w600,
                 ),
@@ -924,14 +927,14 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                               errorBuilder: (context, error, stackTrace) => Icon(
                                 Icons.person,
                                 color: Colors.grey.shade600,
-                                size: 16,
+                                size: 18, // Increased from 16
                               ),
                             ),
                           )
                         : Icon(
                             Icons.person,
                             color: Colors.grey.shade600,
-                            size: 16,
+                            size: 18, // Increased from 16
                           ),
                   );
                 },
@@ -953,7 +956,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                     children: [
                       Text(
                         '@${booking['customerUsername']}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Reduced from 14
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), // Increased from 13
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -961,7 +964,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                         Text(
                           phone,
                           style: const TextStyle(
-                            fontSize: 12, // Increased from 10
+                            fontSize: 14, // Increased from 12
                             color: Colors.grey,
                           ),
                           maxLines: 1,
@@ -977,7 +980,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
             
             // Storage status dropdown (compact) - smaller size but bigger text
             SizedBox(
-              width: 65, // Reduced from 68
+              width: 70, // Increased from 65 to prevent overflow
               child: _buildStorageStatusDropdown(booking, isCompact: true),
             ),
           ],
@@ -1003,7 +1006,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                 child: Text(
                   '#${index + 1 + (_currentApplicationPage * _applicationsPerPage)}',
                   style: const TextStyle(
-                    fontSize: 12, // Increased from 10
+                    fontSize: 14, // Increased from 12
                     color: Colors.black, // Changed from grey to black
                     fontWeight: FontWeight.w600,
                   ),
@@ -1035,14 +1038,14 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                               errorBuilder: (context, error, stackTrace) => Icon(
                                 Icons.person,
                                 color: Colors.grey.shade600,
-                                size: 16,
+                                size: 18, // Increased from 16
                               ),
                             ),
                           )
                         : Icon(
                             Icons.person,
                             color: Colors.grey.shade600,
-                            size: 16,
+                            size: 18, // Increased from 16
                           ),
                   );
                 },
@@ -1063,7 +1066,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                     children: [
                       Text(
                         '@${booking['customerUsername']}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), // Reduced from 14
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), // Increased from 13
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1071,7 +1074,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                         Text(
                           phone,
                           style: const TextStyle(
-                            fontSize: 12, // Increased from 10
+                            fontSize: 14, // Increased from 12
                             color: Colors.grey,
                           ),
                           maxLines: 1,
@@ -1088,14 +1091,14 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
               width: 55,
               child: Text(
                 '${booking['quantity'] ?? 0} items',
-                style: const TextStyle(fontSize: 13, color: Colors.black87, fontWeight: FontWeight.w600), // Increased to match username size
+                style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.w600), // Increased from 13
                 textAlign: TextAlign.center,
                 maxLines: 1, // Changed to 1 line for better display
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             
-            const SizedBox(width: 4), // Reduced space between quantity and status
+            const SizedBox(width: 15), // Increased spacing between quantity and status
             
             // Column 5: Status (70px, right aligned) - Increased to accommodate larger text
             SizedBox(
@@ -1112,7 +1115,7 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                   style: TextStyle(
                     color: _getBookingStatusTextColor(booking['status'], booking['paymentMethod']),
                     fontWeight: FontWeight.bold,
-                    fontSize: 10, // Increased from 7 to 10 for better readability (close to username size but still fitting)
+                    fontSize: 12, // Increased from 10
                   ),
                   textAlign: TextAlign.center,
                   maxLines: 2,
@@ -1150,13 +1153,10 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const OwnerAppBar(title: 'Customer Management'),
-      endDrawer: const OwnerDrawer(),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
+    final content = _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1431,11 +1431,181 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
                   ),
                 ],
               ),
-            ),
+            );
+    
+    // If embedded, just return the content without Scaffold
+    if (widget.isEmbedded) {
+      return content;
+    }
+    
+    // Otherwise, return full page with navigation
+    return Scaffold(
+      appBar: const OwnerAppBar(title: 'Customer Management'),
+      endDrawer: const OwnerDrawer(),
+      body: content,
       bottomNavigationBar: OwnerNavBar(
-        currentIndex: 1,
-        onTap: (index) {},
+        currentIndex: 1, // Customer Management index
+        onTap: (index) {
+          // Navigation handled by shared widget
+        },
       ),
     );
+  }
+
+  // Build widget for approved applications based on payment method and status
+  Widget _buildApprovedApplicationWidget(Map<String, dynamic> booking) {
+    final paymentMethod = booking['paymentMethod']?.toString().toLowerCase();
+    final paymentStatus = booking['paymentStatus']?.toString().toLowerCase();
+    final cashReceived = booking['cashReceived'] ?? false; // Track if cash has been received
+    
+    if (paymentMethod == 'cash') {
+      // For cash payments, show status and allow owner to update cash receipt
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: cashReceived ? Colors.green.shade50 : Colors.orange.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: cashReceived ? Colors.green.shade300 : Colors.orange.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  cashReceived ? Icons.check_circle : Icons.payments,
+                  color: cashReceived ? Colors.green.shade700 : Colors.orange.shade700,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    cashReceived 
+                        ? 'Cash payment received from customer'
+                        : 'Application approved - Cash payment pending',
+                    style: TextStyle(
+                      color: cashReceived ? Colors.green.shade700 : Colors.orange.shade700,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      _updateCashReceiptStatus(booking['id'], !cashReceived);
+                      Navigator.pop(context); // Close dialog after update
+                    },
+                    icon: Icon(
+                      cashReceived ? Icons.undo : Icons.check,
+                      size: 18,
+                    ),
+                    label: Text(cashReceived ? 'Mark as Not Received' : 'Mark as Received'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: cashReceived ? Colors.orange : Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    } else {
+      // For ewallet/online banking, check if payment is completed
+      if (paymentStatus == 'completed') {
+        // Payment already completed - no need to show waiting message
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.green.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.green.shade300),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green.shade700, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Payment completed successfully via ${paymentMethod?.toUpperCase()}',
+                  style: TextStyle(
+                    color: Colors.green.shade700,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      } else {
+        // Still waiting for online payment
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.shade300),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.payment, color: Colors.blue.shade700, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Application approved. Waiting for ${paymentMethod?.toUpperCase()} payment.',
+                  style: TextStyle(
+                    color: Colors.blue.shade700,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
+  // Update cash receipt status using Firestore directly
+  Future<void> _updateCashReceiptStatus(String bookingId, bool cashReceived) async {
+    try {
+      await FirebaseFirestore.instance.collection('Bookings').doc(bookingId).update({
+        'cashReceived': cashReceived,
+        'cashReceivedAt': cashReceived ? DateTime.now().toIso8601String() : null,
+        'cashReceivedBy': cashReceived ? (_ownerUsername ?? 'owner') : null,
+      });
+      
+      await _loadCustomers(); // Refresh the lists
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(cashReceived 
+              ? 'Cash receipt status updated to received' 
+              : 'Cash receipt status updated to not received'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      print('Error updating cash receipt status: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating cash receipt status'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }

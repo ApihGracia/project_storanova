@@ -7,8 +7,9 @@ import 'owner_customer_list.dart';
 
 class NotificationsPage extends StatefulWidget {
   final String? expectedRole; // Optional hint about user role
+  final bool isEmbedded; // Whether this is embedded in another Scaffold
   
-  const NotificationsPage({Key? key, this.expectedRole}) : super(key: key);
+  const NotificationsPage({Key? key, this.expectedRole, this.isEmbedded = false}) : super(key: key);
   
   @override
   _NotificationsPageState createState() => _NotificationsPageState();
@@ -170,6 +171,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // If embedded, just return the content without Scaffold
+    if (widget.isEmbedded) {
+      return _buildNotificationContent();
+    }
+    
+    // Otherwise, build the full page with navigation
     Widget appBar;
     Widget? drawer;
     Widget? bottomNavBar;
@@ -211,9 +218,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return Scaffold(
       appBar: appBar as PreferredSizeWidget,
       endDrawer: drawer,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
+      body: _buildNotificationContent(),
+      bottomNavigationBar: bottomNavBar,
+    );
+  }
+
+  Widget _buildNotificationContent() {
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : Column(
               children: [
                 if (_isBanned) ...[
                   Container(
@@ -263,21 +276,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
                           ),
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.zero,
                           itemCount: _notifications.length,
                           itemBuilder: (context, index) {
                             final notification = _notifications[index];
-                        return CompactNotificationCard(
-                          notification: notification,
-                          onTap: () => _showNotificationDetails(notification),
-                        );
+                            return CompactNotificationCard(
+                              notification: notification,
+                              onTap: () => _showNotificationDetails(notification),
+                            );
                           },
                         ),
                 ),
               ],
-            ),
-      bottomNavigationBar: bottomNavBar,
-    );
+            );
   }
 
   Future<void> _markAsRead(String notificationId) async {
@@ -440,63 +451,109 @@ class CompactNotificationCard extends StatelessWidget {
         icon = Icons.info;
     }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: Icon(
-          icon, 
-          color: isRead ? Colors.grey : iconColor,
-          size: 24,
-        ),
-        title: Text(
-          notification['title'] ?? 'Notification',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
-            color: isRead ? Colors.grey : Colors.black,
+    return Container(
+      color: Colors.white,
+      child: Column(
+        children: [
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Icon section
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: (isRead ? Colors.grey : iconColor).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      icon,
+                      color: isRead ? Colors.grey : iconColor,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Content section
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Title and time row
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                notification['title'] ?? 'Notification',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: isRead ? FontWeight.w500 : FontWeight.w600,
+                                  color: isRead ? Colors.grey[600] : Colors.black,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _formatDateCompact(createdAt),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        // Message
+                        Text(
+                          notification['message'] ?? '',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isRead ? Colors.grey[600] : Colors.grey[700],
+                            height: 1.3,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Status indicator and arrow
+                  Column(
+                    children: [
+                      if (!isRead)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: iconColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Icon(
+                        Icons.arrow_forward_ios,
+                        size: 14,
+                        color: Colors.grey[400],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              notification['message'] ?? '',
-              style: TextStyle(
-                fontSize: 12,
-                color: isRead ? Colors.grey : Colors.black87,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _formatDateCompact(createdAt),
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.grey,
-              ),
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isRead)
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            const SizedBox(width: 8),
-            const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-          ],
-        ),
-        onTap: onTap,
+          // Line separator
+          Container(
+            height: 1,
+            color: Colors.grey[200],
+            margin: const EdgeInsets.only(left: 68), // Align with content, not icon
+          ),
+        ],
       ),
     );
   }

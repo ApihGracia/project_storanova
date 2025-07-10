@@ -473,6 +473,7 @@ class _CustBookingHistoryState extends State<CustBookingHistory> {
       appBar: const CustomerAppBar(
         title: 'Booking History',
         showBackButton: true,
+        showMenuIcon: false,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),

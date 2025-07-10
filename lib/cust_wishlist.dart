@@ -6,7 +6,9 @@ import 'database.dart';
 import 'house_details_dialog.dart';
 
 class CustWishlistPage extends StatefulWidget {
-  const CustWishlistPage({Key? key}) : super(key: key);
+  final bool isEmbedded; // Whether this is embedded in another Scaffold
+  
+  const CustWishlistPage({Key? key, this.isEmbedded = false}) : super(key: key);
 
   @override
   State<CustWishlistPage> createState() => _CustWishlistPageState();
@@ -130,12 +132,9 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: CustomerAppBar(title: 'Wishlist'),
-      endDrawer: CustomerDrawer(),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _wishlistFuture,
-        builder: (context, snapshot) {
+    final content = FutureBuilder<List<Map<String, dynamic>>>(
+      future: _wishlistFuture,
+      builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -223,6 +222,7 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
                       
                       return Card(
                         elevation: 2,
+                        color: Colors.white,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
@@ -330,7 +330,18 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
             ),
           );
         },
-      ),
+      );
+      
+    // If embedded, just return the content without Scaffold
+    if (widget.isEmbedded) {
+      return content;
+    }
+    
+    // Otherwise, return full page with navigation
+    return Scaffold(
+      appBar: CustomerAppBar(title: 'Wishlist'),
+      endDrawer: CustomerDrawer(),
+      body: content,
       bottomNavigationBar: CustomerNavBar(
         currentIndex: 1, // Wishlist index
         onTap: (index) {

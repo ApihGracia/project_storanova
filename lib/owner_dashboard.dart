@@ -12,16 +12,10 @@ import 'package:flutter/foundation.dart';
 import 'shared_widgets.dart';
 import 'notifications_page.dart';
 import 'profile_validator.dart';
+import 'owner_customer_list.dart';
+import 'owner_profile.dart' as owner;
 
-class OwnerDashboard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: OwnerHomePage(),
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
+
 
 class House {
   final String id;
@@ -72,7 +66,79 @@ class OwnerHomePage extends StatefulWidget {
 }
 
 class _OwnerHomePageState extends State<OwnerHomePage> {
-  int _currentIndex = 0; // 0: Home, 1: Customers, 2: Notifications, 3: Profile
+  int _currentIndex = 0;
+  String? _username;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsername();
+  }
+
+  Future<void> _loadUsername() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    
+    final usersSnapshot = await FirebaseFirestore.instance
+        .collection('AppUsers')
+        .where('email', isEqualTo: user.email)
+        .limit(1)
+        .get();
+    
+    if (usersSnapshot.docs.isNotEmpty && mounted) {
+      setState(() {
+        _username = usersSnapshot.docs.first.id;
+      });
+    }
+  }
+
+  String _getPageTitle(int index) {
+    switch (index) {
+      case 0:
+        return 'StoraNova';
+      case 1:
+        return 'Customer Management';
+      case 2:
+        return 'Notifications';
+      case 3:
+        return _username != null ? '@$_username' : 'Profile';
+      default:
+        return 'StoraNova';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: OwnerAppBar(title: _getPageTitle(_currentIndex)),
+      endDrawer: const OwnerDrawer(),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          OwnerDashboardContent(),
+          OwnerCustomerListPage(isEmbedded: true),
+          NotificationsPage(expectedRole: 'owner', isEmbedded: true),
+          owner.ProfileScreen(isEmbedded: true),
+        ],
+      ),
+      bottomNavigationBar: OwnerNavBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+      ),
+    );
+  }
+}
+
+class OwnerDashboardContent extends StatefulWidget {
+  @override
+  _OwnerDashboardContentState createState() => _OwnerDashboardContentState();
+}
+
+class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
   House? _house;
   bool _isLoading = true;
   bool _showHouseForm = false;
@@ -542,30 +608,27 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: OwnerAppBar(title: 'StoraNova'),
-      endDrawer: OwnerDrawer(),
-      body: _isLoading
-          ? const Center(
+    return _isLoading
+        ? const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 24),
+                Text(
+                  'We are processing your house registration...\nHang tight, this may take a few moments!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          )
+        : SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 24),
-                  Text(
-                    'We are processing your house registration...\nHang tight, this may take a few moments!',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: Colors.blueGrey, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-            )
-          : SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
                     if (!_hasApprovedHouse && _applications.isEmpty && !_showHouseForm)
                       Column(
                         children: [
@@ -605,6 +668,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                     if (_house != null && !_showHouseForm) ...[
                       const Text('Your House:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                       Card(
+                        color: Colors.white,
                         child: Column(
                           children: [
                             if (_house!.imageUrls.isNotEmpty)
@@ -671,20 +735,12 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
                   ],
                 ),
               ),
-            ),
-      bottomNavigationBar: OwnerNavBar(
-        currentIndex: (_currentIndex >= 0 && _currentIndex <= 3) ? _currentIndex : 0,
-        onTap: (index) {
-          if (index < 0 || index > 3) return; // Only allow valid indices for owner nav (4 items)
-          if (index == _currentIndex) return;
-          setState(() => _currentIndex = index);
-        },
-      ),
-    );
+            );
   }
 
   Widget _buildHouseForm() {
     return Card(
+      color: Colors.white,
       margin: const EdgeInsets.symmetric(vertical: 16),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -1088,6 +1144,7 @@ class _OwnerHomePageState extends State<OwnerHomePage> {
     }
 
     return Card(
+      color: Colors.white,
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 3,
       child: Padding(

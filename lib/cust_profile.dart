@@ -9,7 +9,9 @@ import 'package:flutter/foundation.dart';
 import 'shared_widgets.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  final bool isEmbedded; // Whether this is embedded in another Scaffold
+  
+  const ProfileScreen({super.key, this.isEmbedded = false});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -29,7 +31,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? email;
   String? username;
   bool isLoading = true;
-  int _currentIndex = 3; // 0: Home, 1: Wishlist, 2: Notification, 3: Profile
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -377,12 +378,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: CustomerAppBar(title: username != null && username!.isNotEmpty ? username! : 'Profile'),
-      endDrawer: const CustomerDrawer(),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
+    final content = isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
               child: Form(
                 key: _formKey,
                 child: Column(
@@ -448,74 +446,251 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.only(top: 8.0),
                         child: Text('Preview. Click Save to upload.', style: TextStyle(color: Colors.blue)),
                       ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 50),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TextFormField(
-                            controller: _nameController,
-                            enabled: isEditing,
-                            style: const TextStyle(color: Colors.black),
-                            decoration: const InputDecoration(
-                              labelText: 'Name',
-                              border: OutlineInputBorder(),
-                              filled: true,
-                              fillColor: Colors.white,
-                            ),
-                            validator: (v) => v == null || v.isEmpty ? 'Name required' : null,
-                          ),
-                          const SizedBox(height: 16),
-                          GestureDetector(
-                            onTap: isEditing
-                                ? () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Contact admin to change your role.')),
-                                    );
-                                  }
-                                : null,
-                            child: AbsorbPointer(
-                              child: TextFormField(
-                                controller: TextEditingController(text: role ?? ''),
-                                enabled: false,
-                                style: const TextStyle(color: Colors.black),
-                                decoration: InputDecoration(
-                                  labelText: 'Role',
-                                  border: const OutlineInputBorder(),
-                                  filled: true,
-                                  fillColor: isEditing ? Colors.grey[200] : Colors.white,
-                                ),
+                          // Single card containing all profile fields
+                          Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.only(bottom: 24),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            color: Colors.white,
+                            child: Padding(
+                              padding: const EdgeInsets.all(20.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Name Row
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      // Label section
+                                      SizedBox(
+                                        width: 80,
+                                        child: Text(
+                                          'Name',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        ':',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      // Value section
+                                      Expanded(
+                                        child: isEditing
+                                            ? TextFormField(
+                                                controller: _nameController,
+                                                style: const TextStyle(color: Colors.black, fontSize: 16),
+                                                decoration: const InputDecoration(
+                                                  hintText: 'Enter your name',
+                                                  border: InputBorder.none,
+                                                  isDense: true,
+                                                  contentPadding: EdgeInsets.zero,
+                                                ),
+                                                validator: (v) => v == null || v.isEmpty ? 'Name required' : null,
+                                              )
+                                            : Text(
+                                                name ?? 'Not set',
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: name != null && name!.isNotEmpty ? Colors.black : Colors.grey[500],
+                                                ),
+                                              ),
+                                      ),
+                                    ],
+                                  ),
+                                  
+                                  // Divider
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                                    child: Divider(height: 1, color: Colors.grey),
+                                  ),
+                                  
+                                  // Role Row
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      // Label section
+                                      SizedBox(
+                                        width: 80,
+                                        child: Text(
+                                          'Role',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        ':',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      // Value section
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: isEditing
+                                              ? () {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    const SnackBar(content: Text('Contact admin to change your role.')),
+                                                  );
+                                                }
+                                              : null,
+                                          child: Row(
+                                            children: [
+                                              Text(
+                                                role ?? 'Not set',
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: role != null && role!.isNotEmpty ? Colors.black : Colors.grey[500],
+                                                ),
+                                              ),
+                                              if (isEditing) ...[
+                                                const SizedBox(width: 8),
+                                                Icon(Icons.info_outline, size: 18, color: Colors.grey[600]),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  
+                                  // Divider
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                                    child: Divider(height: 1, color: Colors.grey),
+                                  ),
+                                  
+                                  // Phone Row
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      // Label section
+                                      SizedBox(
+                                        width: 80,
+                                        child: Text(
+                                          'Phone',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        ':',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      // Value section
+                                      Expanded(
+                                        child: isEditing
+                                            ? TextFormField(
+                                                controller: _phoneController,
+                                                style: const TextStyle(color: Colors.black, fontSize: 16),
+                                                decoration: const InputDecoration(
+                                                  hintText: 'Enter your phone number',
+                                                  border: InputBorder.none,
+                                                  isDense: true,
+                                                  contentPadding: EdgeInsets.zero,
+                                                ),
+                                                keyboardType: TextInputType.phone,
+                                                validator: (v) => v == null || v.isEmpty ? 'Phone number required' : null,
+                                              )
+                                            : Text(
+                                                phone ?? 'Not set',
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: phone != null && phone!.isNotEmpty ? Colors.black : Colors.grey[500],
+                                                ),
+                                              ),
+                                      ),
+                                    ],
+                                  ),
+                                  
+                                  // Divider
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16.0),
+                                    child: Divider(height: 1, color: Colors.grey),
+                                  ),
+                                  
+                                  // Email Row
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      // Label section
+                                      SizedBox(
+                                        width: 80,
+                                        child: Text(
+                                          'Email',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        ':',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      // Value section
+                                      Expanded(
+                                        child: isEditing
+                                            ? TextFormField(
+                                                controller: _emailController,
+                                                style: const TextStyle(color: Colors.black, fontSize: 16),
+                                                decoration: const InputDecoration(
+                                                  hintText: 'Enter your email',
+                                                  border: InputBorder.none,
+                                                  isDense: true,
+                                                  contentPadding: EdgeInsets.zero,
+                                                ),
+                                                keyboardType: TextInputType.emailAddress,
+                                                validator: (v) => v == null || v.isEmpty ? 'Email required' : null,
+                                              )
+                                            : Text(
+                                                email ?? 'Not set',
+                                                style: TextStyle(
+                                                  fontSize: 16,
+                                                  color: email != null && email!.isNotEmpty ? Colors.black : Colors.grey[500],
+                                                ),
+                                              ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _phoneController,
-                            enabled: isEditing,
-                            style: const TextStyle(color: Colors.black),
-                            decoration: const InputDecoration(
-                              labelText: 'Phone Number',
-                              border: OutlineInputBorder(),
-                              filled: true,
-                              fillColor: Colors.white,
-                            ),
-                            validator: (v) => v == null || v.isEmpty ? 'Phone number required' : null,
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            controller: _emailController,
-                            enabled: isEditing,
-                            style: const TextStyle(color: Colors.black),
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              border: OutlineInputBorder(),
-                              filled: true,
-                              fillColor: Colors.white,
-                            ),
-                            validator: (v) => v == null || v.isEmpty ? 'Email required' : null,
-                          ),
-                          const SizedBox(height: 24),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -568,11 +743,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-            ),
+            );
+    
+    // If embedded, just return the content without Scaffold
+    if (widget.isEmbedded) {
+      return content;
+    }
+    
+    // Otherwise, return full page with navigation
+    return Scaffold(
+      appBar: CustomerAppBar(title: username != null && username!.isNotEmpty ? '@$username' : 'Profile'),
+      endDrawer: const CustomerDrawer(),
+      body: content,
       bottomNavigationBar: CustomerNavBar(
-        currentIndex: _currentIndex,
+        currentIndex: 3, // Profile index
         onTap: (index) {
-          setState(() => _currentIndex = index);
+          // Navigation handled by shared widget
         },
       ),
     );

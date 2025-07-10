@@ -597,43 +597,7 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
         const SizedBox(height: 10),
-        const Text(
-          'Or Log In Using:',
-          style: TextStyle(fontSize: 14, color: Colors.black),
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              onPressed: () {
-                // Handle Google login logic here
-              },
-              icon: Image.asset(
-                  'assets/images/logo_google.jpg',
-                  width: 24,
-                  height: 24),
-            ),
-            IconButton(
-              onPressed: () {
-                // Handle Apple login logic here
-              },
-              icon: Image.asset(
-                  'assets/images/logo_apple.jpg',
-                  width: 24,
-                  height: 24),
-            ),
-            IconButton(
-              onPressed: () {
-                // Handle Facebook login logic here
-              },
-              icon: Image.asset(
-                  'assets/images/logo_facebook.jpg',
-                  width: 24,
-                  height: 24),
-            ),
-          ],
-        ),
+
       ],
     );
   }
