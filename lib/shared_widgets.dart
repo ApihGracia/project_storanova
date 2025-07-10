@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'main.dart';
 import 'cust_booking_history.dart';
 import 'database.dart';
+import 'account_page.dart';
+import 'about_us_page.dart';
+import 'help_page.dart';
 
 // Common logout method
 Future<void> performLogout(BuildContext context) async {
@@ -37,11 +40,17 @@ Future<String?> _getUsernameFromFirestore() async {
 class NotificationCounter extends StatefulWidget {
   const NotificationCounter({Key? key}) : super(key: key);
 
+  // Static method to refresh all instances
+  static void refreshGlobal() {
+    _NotificationCounterState._instance?.refreshCount();
+  }
+
   @override
   State<NotificationCounter> createState() => _NotificationCounterState();
 }
 
 class _NotificationCounterState extends State<NotificationCounter> {
+  static _NotificationCounterState? _instance;
   final DatabaseService _db = DatabaseService();
   int _notificationCount = 0;
   String? _username;
@@ -49,7 +58,16 @@ class _NotificationCounterState extends State<NotificationCounter> {
   @override
   void initState() {
     super.initState();
+    _instance = this;
     _loadNotificationCount();
+  }
+
+  @override
+  void dispose() {
+    if (_instance == this) {
+      _instance = null;
+    }
+    super.dispose();
   }
 
   @override
@@ -192,6 +210,45 @@ class CustomerDrawer extends StatelessWidget {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.account_circle),
+              title: const Text('Account'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AccountPage(userRole: 'customer'),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info),
+              title: const Text('About Us'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AboutUsPage(userRole: 'customer'),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help),
+              title: const Text('Help'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => HelpPage(userRole: 'customer'),
+                  ),
+                );
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),
@@ -252,11 +309,13 @@ class CustomerNavBar extends StatelessWidget {
 class OwnerAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final bool showBackButton;
+  final bool showMenuIcon;
 
   const OwnerAppBar({
     Key? key,
     required this.title,
     this.showBackButton = false,
+    this.showMenuIcon = true,
   }) : super(key: key);
 
   @override
@@ -268,7 +327,7 @@ class OwnerAppBar extends StatelessWidget implements PreferredSizeWidget {
       elevation: 2,
       title: Text(title, style: const TextStyle(color: Colors.white)),
       centerTitle: true,
-      actions: [
+      actions: showMenuIcon ? [
         Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -277,7 +336,7 @@ class OwnerAppBar extends StatelessWidget implements PreferredSizeWidget {
             },
           ),
         ),
-      ],
+      ] : null,
     );
   }
 
@@ -310,6 +369,45 @@ class OwnerDrawer extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 32), // Add some spacing instead of Spacer
+            ListTile(
+              leading: const Icon(Icons.account_circle),
+              title: const Text('Account'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AccountPage(userRole: 'owner'),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info),
+              title: const Text('About Us'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AboutUsPage(userRole: 'owner'),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help),
+              title: const Text('Help'),
+              onTap: () {
+                Navigator.pop(context); // Close drawer first
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => HelpPage(userRole: 'owner'),
+                  ),
+                );
+              },
+            ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout, color: Colors.red),

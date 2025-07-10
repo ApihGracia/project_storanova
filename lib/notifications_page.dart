@@ -133,6 +133,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         _notifications = notifications;
         _isLoading = false;
       });
+      // Refresh the notification counter when notifications are loaded
+      NotificationCounter.refreshGlobal();
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -159,6 +161,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       await _db.deleteNotification(notificationId);
       _loadNotifications();
+      // Refresh the notification counter globally
+      NotificationCounter.refreshGlobal();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Notification deleted.')),
       );
@@ -295,6 +299,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       await _db.markNotificationAsRead(notificationId);
       _loadNotifications(); // Refresh the list
+      // Refresh the notification counter globally
+      NotificationCounter.refreshGlobal();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error marking notification as read: $e')),
@@ -599,10 +605,12 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
   bool _isAppealInProgress = false;
   Map<String, dynamic>? _bookingDetails;
   bool _isLoadingBooking = false;
+  late bool _isRead; // Local state to track read status
 
   @override
   void initState() {
     super.initState();
+    _isRead = widget.notification['isRead'] ?? false; // Initialize local read status
     // Load booking details if this is a booking notification
     if (widget.notification['type'] == 'booking' && widget.notification['relatedDocumentId'] != null) {
       _loadBookingDetails();
@@ -640,11 +648,8 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
     }
   }
 
-  bool _showDelete = false;
-
   @override
   Widget build(BuildContext context) {
-    final isRead = widget.notification['isRead'] ?? false;
     final type = widget.notification['type'] as String;
     final createdAt = DateTime.parse(widget.notification['createdAt']);
 
@@ -713,57 +718,47 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                           ),
                         ),
                       ),
-                      if (!isRead)
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: const BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
                     ],
                   ),
                 ),
-                // Delete button at the top right corner (only if read or _showDelete is true)
-                if (isRead || _showDelete)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      tooltip: 'Delete Notification',
-                      onPressed: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Delete Notification'),
-                            content: const Text('Are you sure you want to delete this notification?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.of(context).pop(true),
-                                child: const Text('Delete', style: TextStyle(color: Colors.red)),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirm == true) {
-                          widget.onDelete(widget.notification['id']);
-                          Navigator.of(context).pop();
-                        }
-                      },
-                    ),
+                // Delete button at the top right corner (always show now)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    tooltip: 'Delete Notification',
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Delete Notification'),
+                          content: const Text('Are you sure you want to delete this notification?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(false),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true) {
+                        widget.onDelete(widget.notification['id']);
+                        Navigator.of(context).pop();
+                      }
+                    },
                   ),
+                ),
               ],
             ),
             
-            // Content
+            // Content - Made scrollable
             Expanded(
-              child: Padding(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -958,13 +953,13 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                   // Regular Actions Row
                   Row(
                     children: [
-                      if (!isRead)
+                      if (!_isRead)
                         Expanded(
                           child: ElevatedButton(
                             onPressed: () async {
                               await widget.onMarkAsRead(widget.notification['id']);
                               setState(() {
-                                _showDelete = true;
+                                _isRead = true; // Update local state immediately
                               });
                             },
                             style: ElevatedButton.styleFrom(
@@ -974,7 +969,7 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                             child: const Text('Mark as Read'),
                           ),
                         ),
-                      if (!isRead && type == 'ban') const SizedBox(width: 12),
+                      if (!_isRead && type == 'ban') const SizedBox(width: 12),
                       if (type == 'ban')
                         Expanded(
                           child: FutureBuilder<bool>(
@@ -996,7 +991,7 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                             },
                           ),
                         ),
-                      if (isRead || type != 'ban') ...[
+                      if (_isRead || type != 'ban') ...[
                         const Spacer(),
                         TextButton(
                           onPressed: () => Navigator.of(context).pop(),

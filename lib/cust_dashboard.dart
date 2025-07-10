@@ -723,55 +723,53 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                                     ],
                                   ),
                                 ),
-                                // Action buttons based on booking status
-                                Flexible(
-                                  fit: FlexFit.loose,
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      ...(() {
-                                        if (isPending) {
-                                          return [
-                                            IconButton(
-                                              icon: const Icon(Icons.edit, size: 18),
-                                              onPressed: () => _editBooking(booking),
-                                              tooltip: 'Edit booking',
-                                              padding: const EdgeInsets.all(4),
-                                              constraints: const BoxConstraints(),
-                                            ),
-                                            IconButton(
-                                              icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                                              onPressed: () => _deleteBooking(booking),
-                                              tooltip: 'Delete booking',
-                                              padding: const EdgeInsets.all(4),
-                                              constraints: const BoxConstraints(),
-                                            ),
-                                          ];
-                                        } else if (booking['status']?.toLowerCase() == 'approved' && 
-                                                  booking['paymentStatus']?.toLowerCase() != 'completed' &&
-                                                  booking['paymentMethod']?.toLowerCase() != 'cash') {
-                                          return [
-                                            ElevatedButton.icon(
-                                              onPressed: () => _showPaymentDialog(booking),
-                                              icon: const Icon(Icons.payment, size: 16),
-                                              label: const Text('Pay Now', style: TextStyle(fontSize: 12)),
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: Colors.orange,
-                                                foregroundColor: Colors.white,
-                                                minimumSize: const Size(80, 32),
-                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
+                                // Action buttons based on booking status - aligned to the right
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    ...(() {
+                                      if (isPending) {
+                                        return [
+                                          IconButton(
+                                            icon: const Icon(Icons.edit, size: 18),
+                                            onPressed: () => _editBooking(booking),
+                                            tooltip: 'Edit booking',
+                                            padding: const EdgeInsets.all(4),
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                            onPressed: () => _deleteBooking(booking),
+                                            tooltip: 'Delete booking',
+                                            padding: const EdgeInsets.all(4),
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                        ];
+                                      } else if (booking['status']?.toLowerCase() == 'approved' && 
+                                                booking['paymentStatus']?.toLowerCase() != 'completed' &&
+                                                booking['paymentMethod']?.toLowerCase() != 'cash') {
+                                        return [
+                                          ElevatedButton.icon(
+                                            onPressed: () => _showPaymentDialog(booking),
+                                            icon: const Icon(Icons.payment, size: 16),
+                                            label: const Text('Pay Now', style: TextStyle(fontSize: 12)),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.orange,
+                                              foregroundColor: Colors.white,
+                                              minimumSize: const Size(80, 32),
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(6),
                                               ),
                                             ),
-                                          ];
-                                        } else {
-                                          return <Widget>[];
-                                        }
-                                      })(),
-                                    ],
-                                  ),
+                                          ),
+                                        ];
+                                      } else {
+                                        return <Widget>[];
+                                      }
+                                    })(),
+                                  ],
                                 ),
                               ],
                             ),

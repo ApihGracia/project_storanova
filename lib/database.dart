@@ -65,6 +65,116 @@ class DatabaseService {
     await usersCollection.doc(username).delete();
   }
 
+  // DELETE: Comprehensive user deletion from all collections
+  Future<void> deleteUserCompletely(String username) async {
+    try {
+      print("Starting complete deletion for user: $username");
+      
+      // 1. Delete from AppUsers collection
+      await usersCollection.doc(username).delete();
+      print("Deleted user from AppUsers collection");
+      
+      // 2. Delete all notifications for this user
+      final notificationsQuery = await FirebaseFirestore.instance
+          .collection('Notifications')
+          .where('username', isEqualTo: username)
+          .get();
+      
+      for (final doc in notificationsQuery.docs) {
+        await doc.reference.delete();
+      }
+      print("Deleted ${notificationsQuery.docs.length} notifications");
+      
+      // 3. Delete all appeals by this user
+      final appealsQuery = await FirebaseFirestore.instance
+          .collection('Appeals')
+          .where('username', isEqualTo: username)
+          .get();
+      
+      for (final doc in appealsQuery.docs) {
+        await doc.reference.delete();
+      }
+      print("Deleted ${appealsQuery.docs.length} appeals");
+      
+      // 4. Delete all wishlists for this user
+      final wishlistsQuery = await FirebaseFirestore.instance
+          .collection('Wishlists')
+          .where('customerUsername', isEqualTo: username)
+          .get();
+      
+      for (final doc in wishlistsQuery.docs) {
+        await doc.reference.delete();
+      }
+      print("Deleted ${wishlistsQuery.docs.length} wishlist items");
+      
+      // 5. Delete all bookings by this customer
+      final customerBookingsQuery = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('customerUsername', isEqualTo: username)
+          .get();
+      
+      for (final doc in customerBookingsQuery.docs) {
+        await doc.reference.delete();
+      }
+      print("Deleted ${customerBookingsQuery.docs.length} customer bookings");
+      
+      // 6. Delete all bookings for houses owned by this user
+      final ownerBookingsQuery = await FirebaseFirestore.instance
+          .collection('Bookings')
+          .where('ownerUsername', isEqualTo: username)
+          .get();
+      
+      for (final doc in ownerBookingsQuery.docs) {
+        await doc.reference.delete();
+      }
+      print("Deleted ${ownerBookingsQuery.docs.length} owner bookings");
+      
+      // 7. Delete house if this user is an owner
+      try {
+        final houseDoc = await FirebaseFirestore.instance.collection('Houses').doc(username).get();
+        if (houseDoc.exists) {
+          await houseDoc.reference.delete();
+          print("Deleted house registration");
+        } else {
+          print("No house registration found");
+        }
+      } catch (e) {
+        print("Error checking/deleting house registration: $e");
+      }
+      
+      // 8. Delete house application if this user is an owner
+      try {
+        final applicationDoc = await houseApplicationsCollection.doc(username).get();
+        if (applicationDoc.exists) {
+          await applicationDoc.reference.delete();
+          print("Deleted house application");
+        } else {
+          print("No house application found");
+        }
+      } catch (e) {
+        print("Error checking/deleting house application: $e");
+      }
+      
+      // 9. Delete from approved houses if this user is an owner
+      try {
+        final approvedHouseDoc = await approvedHousesCollection.doc(username).get();
+        if (approvedHouseDoc.exists) {
+          await approvedHouseDoc.reference.delete();
+          print("Deleted approved house");
+        } else {
+          print("No approved house found");
+        }
+      } catch (e) {
+        print("Error checking/deleting approved house: $e");
+      }
+      
+      print("Complete deletion finished successfully for user: $username");
+    } catch (e) {
+      print("Error during complete user deletion for $username: $e");
+      throw Exception("Failed to completely delete user data: $e");
+    }
+  }
+
   // Get user role by username (username is now the document ID)
   Future<String?> getUserRole(String username) async {
     print("DatabaseService: Getting role for username: $username");
