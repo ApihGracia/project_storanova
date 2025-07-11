@@ -59,6 +59,43 @@ class _AccountPageState extends State<AccountPage> {
     }
   }
 
+  Future<String?> _showPasswordDialog() async {
+    final TextEditingController passwordController = TextEditingController();
+    String? result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Re-authenticate'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('For security, please enter your password to delete your account:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Enter your password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, passwordController.text),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    passwordController.dispose();
+    return result;
+  }
+
   Future<void> _deleteAccount() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -101,6 +138,23 @@ class _AccountPageState extends State<AccountPage> {
 
     if (confirmed == true) {
       try {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No user logged in'), backgroundColor: Colors.red),
+          );
+          return;
+        }
+
+        // Get password for reauthentication
+        final password = await _showPasswordDialog();
+        if (password == null || password.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Password required for account deletion'), backgroundColor: Colors.red),
+          );
+          return;
+        }
+
         // Show loading dialog
         showDialog(
           context: context,
@@ -116,6 +170,13 @@ class _AccountPageState extends State<AccountPage> {
           ),
         );
 
+        // Reauthenticate user before deletion
+        final credential = EmailAuthProvider.credential(
+          email: user.email!,
+          password: password,
+        );
+        await user.reauthenticateWithCredential(credential);
+
         // Delete user data from Firestore - Complete deletion from all collections
         if (_username != null) {
           // Use the comprehensive deletion function
@@ -123,7 +184,10 @@ class _AccountPageState extends State<AccountPage> {
         }
 
         // Delete Firebase Auth account
-        await FirebaseAuth.instance.currentUser?.delete();
+        await user.delete();
+
+        // Close loading dialog
+        Navigator.of(context).pop();
 
         // Navigate to login page
         Navigator.pushAndRemoveUntil(

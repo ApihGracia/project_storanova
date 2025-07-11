@@ -153,6 +153,7 @@ class _BookingDialogState extends State<BookingDialog> {
                             onChanged: (value) {
                               setState(() {
                                 _usePickupService = value ?? false;
+                                // Force UI refresh by calling setState on the parent
                               });
                             },
                             dense: true,
@@ -249,22 +250,74 @@ class _BookingDialogState extends State<BookingDialog> {
   }
 
   Widget _bookingSummary() {
+    final pricePerItem = double.tryParse(widget.house['pricePerItem']?.toString() ?? '0') ?? 0;
+    final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
+    final baseTotal = pricePerItem * quantity;
+    final pickupCost = _usePickupService && widget.house['pickupServiceCost'] != null 
+        ? double.tryParse(widget.house['pickupServiceCost'].toString()) ?? 0 
+        : 0;
+    final total = baseTotal + pickupCost;
+    
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.blue.shade50,
         borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.blue.shade200),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Booking Summary:', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('Quantity: $_selectedPriceOption items'),
-          Text('Price per item: RM${widget.house['pricePerItem']}'),
-          if (_usePickupService && widget.house['pickupServiceCost'] != null)
-            Text('Pickup service: RM${widget.house['pickupServiceCost']}'),
-          Text('Total: RM${_calculateTotal()}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          const Divider(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Quantity: $_selectedPriceOption items'),
+              Text(''),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Price per item:'),
+              Text('RM${pricePerItem.toStringAsFixed(2)}'),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Subtotal:'),
+              Text('RM${baseTotal.toStringAsFixed(2)}'),
+            ],
+          ),
+          if (_usePickupService && widget.house['pickupServiceCost'] != null) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Pickup service:'),
+                Text('RM${pickupCost.toStringAsFixed(2)}'),
+              ],
+            ),
+          ],
+          const Divider(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Total:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'RM${total.toStringAsFixed(2)}', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -375,9 +428,10 @@ class _BookingDialogState extends State<BookingDialog> {
         double totalPrice = quantity * pricePerItem;
         String priceBreakdown = 'RM$pricePerItem per item × $quantity items';
 
-        if (_usePickupService) {
-          final pickupCost = double.tryParse(widget.house['pickupServiceCost']?.toString() ?? '50') ?? 50;
+        if (_usePickupService && widget.house['pickupServiceCost'] != null) {
+          final pickupCost = double.tryParse(widget.house['pickupServiceCost'].toString()) ?? 0;
           totalPrice += pickupCost;
+          priceBreakdown += ' + RM$pickupCost pickup service';
         }
 
         // Update booking data

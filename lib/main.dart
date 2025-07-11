@@ -1068,7 +1068,7 @@ class _LoginPageState extends State<LoginPage> {
         children: [
           Positioned.fill(
             child: Image.network(
-              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752238960/upsi_yw9z1b.jpg',
+              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752252317/grf8snwyr5evx3v6vgfs.jpg',
               fit: BoxFit.cover,
             ),
           ),
@@ -1117,7 +1117,7 @@ class _LoginPageState extends State<LoginPage> {
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: Image.network(
-              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752239340/lwydu6emy01xkxmsatju.png',
+              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752252900/rvmpbicbuori5bwtajw1.png',
               fit: BoxFit.contain,
             ),
           ),
@@ -1229,7 +1229,7 @@ class _LoginPageState extends State<LoginPage> {
           child: Padding(
             padding: const EdgeInsets.all(8.0),
             child: Image.network(
-              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752239340/lwydu6emy01xkxmsatju.png',
+              'https://res.cloudinary.com/dxeejx1hq/image/upload/v1752252900/rvmpbicbuori5bwtajw1.png',
               fit: BoxFit.contain,
             ),
           ),
