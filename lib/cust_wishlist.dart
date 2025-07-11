@@ -182,23 +182,47 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
               );
             }
             
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.favorite_border, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text(
-                    'Your wishlist is empty',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
+            return Column(
+              children: [
+                // Always show header with refresh button even when empty
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Your Wishlist (0 items)',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _refreshWishlist,
+                        tooltip: 'Refresh',
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Houses you favorite will appear here',
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.favorite_border, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          'Your wishlist is empty',
+                          style: TextStyle(fontSize: 18, color: Colors.grey),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Houses you favorite will appear here',
+                          style: TextStyle(fontSize: 14, color: Colors.grey),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
+                ),
+              ],
             );
           }
           
