@@ -233,6 +233,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ? const Center(child: CircularProgressIndicator())
         : Column(
               children: [
+                // Refresh button
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _loadNotifications,
+                        tooltip: 'Refresh',
+                      ),
+                    ],
+                  ),
+                ),
                 if (_isBanned) ...[
                   Container(
                     width: double.infinity,

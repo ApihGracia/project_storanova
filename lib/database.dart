@@ -18,6 +18,7 @@ class DatabaseService {
       'username': username,
       'email': email,
       'role': role,
+      'createdAt': FieldValue.serverTimestamp(), // Date joined
       if (name != null) 'name': name,
       if (phone != null) 'phone': phone,
       if (profileImageUrl != null) 'profileImageUrl': profileImageUrl,
@@ -851,6 +852,8 @@ class DatabaseService {
     String? paymentMethod,
     bool usePickupService = false,
     int? quantity,
+    double? pricePerItem, // Store the original price per item
+    double? pickupServiceCost, // Store the original pickup service cost
   }) async {
     // Generate booking ID
     final bookingSnapshot = await FirebaseFirestore.instance
@@ -875,6 +878,8 @@ class DatabaseService {
       'paymentMethod': paymentMethod,
       'usePickupService': usePickupService,
       'quantity': quantity,
+      'pricePerItem': pricePerItem, // Store for accurate editing calculations
+      'pickupServiceCost': pickupServiceCost, // Store for accurate editing calculations
       'status': 'pending', // pending, approved, rejected, cancelled
       'createdAt': DateTime.now().toIso8601String(),
       'reviewedAt': null,

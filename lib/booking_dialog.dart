@@ -67,9 +67,6 @@ class _BookingDialogState extends State<BookingDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final prices = widget.house['prices'] as List? ?? [];
-    final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
-
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
@@ -94,63 +91,40 @@ class _BookingDialogState extends State<BookingDialog> {
                   ),
                   const SizedBox(height: 16),
 
-                  if (hasNewPricing) ...[
-                    Text('Price per Item: RM${widget.house['pricePerItem']}',
-                        style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.green)),
-                    Row(
-                      children: [
-                        if (widget.house['maxItemQuantity'] != null)
-                          Text('Maximum Items: ${widget.house['maxItemQuantity']}',
-                              style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                        const SizedBox(width: 8),
-                        const Tooltip(
-                          message: '1 item = 1 box or 1 bag',
-                          child: Icon(Icons.info_outline, size: 16, color: Colors.blue),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    TextFormField(
-                      decoration: const InputDecoration(
-                        labelText: 'Quantity',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  Text('Price per Item: RM${widget.house['pricePerItem'] ?? '0'}',
+                      style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.green)),
+                  Row(
+                    children: [
+                      if (widget.house['maxItemQuantity'] != null)
+                        Text('Maximum Items: ${widget.house['maxItemQuantity']}',
+                            style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(width: 8),
+                      const Tooltip(
+                        message: '1 item = 1 box or 1 bag',
+                        child: Icon(Icons.info_outline, size: 16, color: Colors.blue),
                       ),
-                      keyboardType: TextInputType.number,
-                      initialValue: widget.booking != null ? widget.booking!['quantity']?.toString() : null,
-                      onChanged: (value) => setState(() => _selectedPriceOption = value),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) return 'Please enter quantity';
-                        final quantity = int.tryParse(value);
-                        if (quantity == null || quantity <= 0) return 'Please enter a valid quantity';
-                        final maxQty = int.tryParse(widget.house['maxItemQuantity']?.toString() ?? '0') ?? 0;
-                        if (maxQty > 0 && quantity > maxQty) return 'Maximum quantity is $maxQty';
-                        return null;
-                      },
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Quantity',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
-                    const SizedBox(height: 16),
-                  ] else if (prices.isNotEmpty) ...[
-                    const Text('Select Price Option:', style: TextStyle(fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      ),
-                      hint: const Text('Choose a price option'),
-                      value: _selectedPriceOption,
-                      items: prices.map<DropdownMenuItem<String>>((price) {
-                        if (price is Map && price['amount'] != null && price['unit'] != null) {
-                          final option = 'RM${price['amount']} ${price['unit']}';
-                          return DropdownMenuItem(value: option, child: Text(option));
-                        }
-                        return const DropdownMenuItem(value: '', child: Text('Invalid price'));
-                      }).toList(),
-                      onChanged: (value) => setState(() => _selectedPriceOption = value),
-                      validator: (value) => value == null || value.isEmpty ? 'Please select a price option' : null,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                    keyboardType: TextInputType.number,
+                    initialValue: widget.booking != null ? widget.booking!['quantity']?.toString() : null,
+                    onChanged: (value) => setState(() => _selectedPriceOption = value),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) return 'Please enter quantity';
+                      final quantity = int.tryParse(value);
+                      if (quantity == null || quantity <= 0) return 'Please enter a valid quantity';
+                      final maxQty = int.tryParse(widget.house['maxItemQuantity']?.toString() ?? '0') ?? 0;
+                      if (maxQty > 0 && quantity > maxQty) return 'Maximum quantity is $maxQty';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
 
                   const Text('Store Date:', style: TextStyle(fontWeight: FontWeight.w500)),
                   const SizedBox(height: 8),
@@ -206,7 +180,7 @@ class _BookingDialogState extends State<BookingDialog> {
                   const SizedBox(height: 16),
 
                   if (_checkInDate != null && _checkOutDate != null && _selectedPriceOption != null)
-                    _bookingSummary(hasNewPricing),
+                    _bookingSummary(),
 
                   const SizedBox(height: 16),
                   const Text('Special Requests (Optional):', style: TextStyle(fontWeight: FontWeight.w500)),
@@ -274,7 +248,7 @@ class _BookingDialogState extends State<BookingDialog> {
     );
   }
 
-  Widget _bookingSummary(bool hasNewPricing) {
+  Widget _bookingSummary() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -286,15 +260,10 @@ class _BookingDialogState extends State<BookingDialog> {
         children: [
           const Text('Booking Summary:', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          if (hasNewPricing) ...[
-            Text('Quantity: $_selectedPriceOption items'),
-            Text('Price per item: RM${widget.house['pricePerItem']}'),
-            if (_usePickupService && widget.house['pickupServiceCost'] != null)
-              Text('Pickup service: RM${widget.house['pickupServiceCost']}'),
-          ] else ...[
-            Text('Duration: ${_checkOutDate!.difference(_checkInDate!).inDays} days'),
-            Text('Price: $_selectedPriceOption'),
-          ],
+          Text('Quantity: $_selectedPriceOption items'),
+          Text('Price per item: RM${widget.house['pricePerItem']}'),
+          if (_usePickupService && widget.house['pickupServiceCost'] != null)
+            Text('Pickup service: RM${widget.house['pickupServiceCost']}'),
           Text('Total: RM${_calculateTotal()}', style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
@@ -368,21 +337,10 @@ class _BookingDialogState extends State<BookingDialog> {
   double _calculateTotal() {
     if (_checkInDate == null || _checkOutDate == null || _selectedPriceOption == null) return 0;
 
-    final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
-    double baseTotal = 0;
-
-    if (hasNewPricing) {
-      final pricePerItem = double.tryParse(widget.house['pricePerItem'].toString()) ?? 0;
-      final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
-      baseTotal = pricePerItem * quantity;
-    } else {
-      final days = _checkOutDate!.difference(_checkInDate!).inDays;
-      if (days <= 0) return 0;
-      final priceMatch = RegExp(r'RM(\d+(?:\.\d+)?)').firstMatch(_selectedPriceOption!);
-      if (priceMatch == null) return 0;
-      final price = double.tryParse(priceMatch.group(1)!) ?? 0;
-      baseTotal = _selectedPriceOption!.contains('per week') ? price * (days / 7).ceil() : price * days;
-    }
+    // Only support item-based pricing
+    final pricePerItem = double.tryParse(widget.house['pricePerItem']?.toString() ?? '0') ?? 0;
+    final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
+    double baseTotal = pricePerItem * quantity;
 
     if (_usePickupService && widget.house['pickupServiceCost'] != null) {
       final pickupCost = double.tryParse(widget.house['pickupServiceCost'].toString()) ?? 0;
@@ -411,30 +369,11 @@ class _BookingDialogState extends State<BookingDialog> {
 
     try {
       if (widget.booking != null) {
-        // Update existing booking
-        final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
-        
-        // Calculate pricing for update
-        double totalPrice = 0;
-        int? quantity;
-        String priceBreakdown = '';
-        
-        if (hasNewPricing) {
-          quantity = int.parse(_selectedPriceOption!);
-          final pricePerItem = double.parse(widget.house['pricePerItem'].toString());
-          totalPrice = quantity * pricePerItem;
-          priceBreakdown = 'RM$pricePerItem per item × $quantity items';
-        } else {
-          // For old pricing structure, parse the selected option
-          if (_selectedPriceOption != null && _selectedPriceOption!.contains('RM')) {
-            final regex = RegExp(r'RM(\d+(?:\.\d+)?)');
-            final match = regex.firstMatch(_selectedPriceOption!);
-            if (match != null) {
-              totalPrice = double.parse(match.group(1)!);
-            }
-            priceBreakdown = _selectedPriceOption!;
-          }
-        }
+        // Update existing booking - only support item-based pricing
+        final quantity = int.parse(_selectedPriceOption!);
+        final pricePerItem = double.parse(widget.house['pricePerItem'].toString());
+        double totalPrice = quantity * pricePerItem;
+        String priceBreakdown = 'RM$pricePerItem per item × $quantity items';
 
         if (_usePickupService) {
           final pickupCost = double.tryParse(widget.house['pickupServiceCost']?.toString() ?? '50') ?? 50;
@@ -452,11 +391,14 @@ class _BookingDialogState extends State<BookingDialog> {
           'specialRequests': _specialRequestsController.text.trim(),
           'totalPrice': totalPrice,
           'priceBreakdown': priceBreakdown,
+          'quantity': quantity,
+          'pricePerItem': pricePerItem,
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
-        if (quantity != null) {
-          updatedBookingData['quantity'] = quantity;
+        if (_usePickupService) {
+          final pickupCost = double.tryParse(widget.house['pickupServiceCost']?.toString() ?? '50') ?? 50;
+          updatedBookingData['pickupServiceCost'] = pickupCost;
         }
 
         // Update the booking in Firestore
@@ -483,16 +425,8 @@ class _BookingDialogState extends State<BookingDialog> {
         final username = usersSnapshot.docs.first.id;
 
         final total = _calculateTotal();
-        final hasNewPricing = widget.house['pricePerItem'] != null && widget.house['pricePerItem'].toString().isNotEmpty;
-
-        String priceBreakdown;
-        if (hasNewPricing) {
-          final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
-          priceBreakdown = 'RM${widget.house['pricePerItem']} per item × $quantity items';
-        } else {
-          final days = _checkOutDate!.difference(_checkInDate!).inDays;
-          priceBreakdown = '$_selectedPriceOption for $days days';
-        }
+        final quantity = int.tryParse(_selectedPriceOption!) ?? 0;
+        final priceBreakdown = 'RM${widget.house['pricePerItem']} per item × $quantity items';
 
         await _db.createBooking(
           customerUsername: username,
@@ -508,7 +442,9 @@ class _BookingDialogState extends State<BookingDialog> {
               : _specialRequestsController.text.trim(),
           paymentMethod: _selectedPaymentMethod,
           usePickupService: _usePickupService,
-          quantity: hasNewPricing ? (int.tryParse(_selectedPriceOption!) ?? 0) : null,
+          quantity: quantity,
+          pricePerItem: double.tryParse(widget.house['pricePerItem'].toString()),
+          pickupServiceCost: _usePickupService ? double.tryParse(widget.house['pickupServiceCost']?.toString() ?? '50') : null,
         );
 
         ScaffoldMessenger.of(context).showSnackBar(

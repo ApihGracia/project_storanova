@@ -207,9 +207,19 @@ class _CustWishlistPageState extends State<CustWishlistPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Your Wishlist (${wishlistItems.length} items)',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Your Wishlist (${wishlistItems.length} items)',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _refreshWishlist,
+                      tooltip: 'Refresh',
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 Expanded(

@@ -1160,6 +1160,17 @@ class _OwnerCustomerListPageState extends State<OwnerCustomerListPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Refresh button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _loadData,
+                        tooltip: 'Refresh',
+                      ),
+                    ],
+                  ),
                   // Application List Section
                   Container(
                     width: double.infinity,

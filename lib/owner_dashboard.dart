@@ -632,6 +632,17 @@ class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Refresh button
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _fetchHouseApplications,
+                        tooltip: 'Refresh',
+                      ),
+                    ],
+                  ),
                     if (!_hasApprovedHouse && _applications.isEmpty && !_showHouseForm)
                       Column(
                         children: [

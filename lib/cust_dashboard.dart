@@ -110,7 +110,6 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
   DateTime? _editingCheckOut;
   String? _editingPaymentMethod;
   bool _editingUsePickupService = false;
-  Map<String, dynamic>? _currentHouse;
 
   @override
   void initState() {
@@ -221,25 +220,9 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
   }
 
   // In-place booking editing methods
-  void _startEditingBooking(Map<String, dynamic> booking, Map<String, dynamic> house) {
-    setState(() {
-      _isEditingBooking = true;
-      _currentHouse = house;
-      
-      // Initialize editing values with current booking data
-      _quantityController.text = booking['quantity']?.toString() ?? '';
-      _specialRequestsController.text = booking['specialRequests']?.toString() ?? '';
-      _editingCheckIn = booking['checkIn']?.toDate();
-      _editingCheckOut = booking['checkOut']?.toDate();
-      _editingPaymentMethod = booking['paymentMethod']?.toString();
-      _editingUsePickupService = booking['usePickupService'] == true;
-    });
-  }
-
   void _cancelEditingBooking() {
     setState(() {
       _isEditingBooking = false;
-      _currentHouse = null;
       
       // Clear controllers
       _quantityController.clear();
@@ -258,12 +241,14 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
 
     try {
       // Create updated booking data
-      final updatedBooking = Map<String, dynamic>.from(booking);
+      final updatedBooking = <String, dynamic>{};
       
+      // Update basic fields
       if (_quantityController.text.isNotEmpty) {
         updatedBooking['quantity'] = int.parse(_quantityController.text);
       }
       updatedBooking['specialRequests'] = _specialRequestsController.text;
+      
       if (_editingCheckIn != null) {
         updatedBooking['checkIn'] = Timestamp.fromDate(_editingCheckIn!);
       }
@@ -274,33 +259,15 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
         updatedBooking['paymentMethod'] = _editingPaymentMethod;
       }
       updatedBooking['usePickupService'] = _editingUsePickupService;
+      updatedBooking['updatedAt'] = FieldValue.serverTimestamp();
 
-      // Recalculate pricing
-      if (_currentHouse != null) {
-        final house = _currentHouse!;
-        double basePrice = 0;
-        int quantity = int.tryParse(_quantityController.text) ?? 1;
-        
-        if (_editingCheckIn != null && _editingCheckOut != null) {
-          final days = _editingCheckOut!.difference(_editingCheckIn!).inDays;
-          
-          if (house['pricePerItem'] != null) {
-            basePrice = (house['pricePerItem'] as num).toDouble() * quantity * days;
-          } else if (house['prices'] != null && (house['prices'] as List).isNotEmpty) {
-            final prices = house['prices'] as List;
-            basePrice = (prices.first['price'] as num).toDouble() * quantity * days;
-          }
-        }
-
-        double pickupCost = 0;
-        if (_editingUsePickupService && house['offerPickupService'] == true) {
-          pickupCost = double.tryParse(house['pickupServiceCost']?.toString() ?? '50') ?? 50;
-        }
-
-        final totalPrice = basePrice + pickupCost;
-        updatedBooking['totalPrice'] = totalPrice;
-        updatedBooking['priceBreakdown'] = 'Base: RM$basePrice${pickupCost > 0 ? ', Pickup: RM$pickupCost' : ''}';
-      }
+      // Recalculate total price
+      double newTotalPrice = _calculateUpdatedPrice(booking);
+      updatedBooking['totalPrice'] = newTotalPrice;
+      
+      // Update price breakdown
+      String priceBreakdown = _generatePriceBreakdown(booking, newTotalPrice);
+      updatedBooking['priceBreakdown'] = priceBreakdown;
 
       // Update in Firestore
       await FirebaseFirestore.instance
@@ -321,6 +288,57 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
         SnackBar(content: Text('Error updating booking: $e')),
       );
     }
+  }
+
+  // Calculate updated price based on current editing values
+  double _calculateUpdatedPrice(Map<String, dynamic> booking) {
+    // Get current editing values or fallback to original booking values
+    final quantity = _quantityController.text.isNotEmpty 
+        ? int.parse(_quantityController.text) 
+        : (booking['quantity'] ?? 1);
+    
+    // Get the actual pricing data from the booking (this was stored when booking was created)
+    final pricePerItem = booking['pricePerItem'] != null 
+        ? double.tryParse(booking['pricePerItem'].toString()) ?? 0.0
+        : 0.0;
+    
+    final pickupServiceCost = booking['pickupServiceCost'] != null 
+        ? double.tryParse(booking['pickupServiceCost'].toString()) ?? 0.0
+        : 0.0;
+    
+    // Calculate base price: quantity × price per item (no days multiplication for item-based pricing)
+    double basePrice = quantity * pricePerItem;
+    
+    // Add pickup service cost if selected
+    double pickupCost = _editingUsePickupService ? pickupServiceCost : 0.0;
+    
+    return basePrice + pickupCost;
+  }
+
+  // Generate price breakdown text
+  String _generatePriceBreakdown(Map<String, dynamic> booking, double totalPrice) {
+    final quantity = _quantityController.text.isNotEmpty 
+        ? int.parse(_quantityController.text) 
+        : (booking['quantity'] ?? 1);
+    
+    // Get the actual pricing data from the booking
+    final pricePerItem = booking['pricePerItem'] != null 
+        ? double.tryParse(booking['pricePerItem'].toString()) ?? 0.0
+        : 0.0;
+    
+    final pickupServiceCost = booking['pickupServiceCost'] != null 
+        ? double.tryParse(booking['pickupServiceCost'].toString()) ?? 0.0
+        : 0.0;
+    
+    double pickupCost = _editingUsePickupService ? pickupServiceCost : 0.0;
+    double basePrice = totalPrice - pickupCost;
+    
+    String breakdown = '$quantity items × RM${pricePerItem.toStringAsFixed(2)} = RM${basePrice.toStringAsFixed(2)}';
+    if (_editingUsePickupService) {
+      breakdown += ', Pickup: RM${pickupCost.toStringAsFixed(2)}';
+    }
+    
+    return breakdown;
   }
 
   Color _getBookingStatusColor(String? status) {
@@ -497,22 +515,8 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
       }
     }
 
-    // Get available payment methods for the house
-    List<String> _getAvailablePaymentMethods(Map<String, dynamic>? house) {
-      if (house == null) return ['Cash'];
-      
-      final paymentMethods = house['paymentMethods'] as Map<String, dynamic>? ?? {};
-      List<String> availableMethods = [];
-
-      if (paymentMethods['cash'] == true) availableMethods.add('Cash');
-      if (paymentMethods['online_banking'] == true) availableMethods.add('Online Banking');
-      if (paymentMethods['ewallet'] == true) availableMethods.add('E-Wallet');
-
-      return availableMethods.isEmpty ? ['Cash'] : availableMethods;
-    }
-
     // Date picker helper
-    Future<void> _selectDate(bool isCheckIn) async {
+    Future<void> selectDate(bool isCheckIn) async {
       final DateTime? picked = await showDatePicker(
         context: context,
         initialDate: isCheckIn 
@@ -536,43 +540,35 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
       }
     }
 
-    // Fetch house data for editing
-    Future<Map<String, dynamic>?> _fetchHouseData() async {
-      try {
-        Map<String, dynamic>? house;
-        
-        // First try to get house by ID
-        if (booking['houseId'] != null) {
-          final houseDoc = await FirebaseFirestore.instance
-              .collection('Houses')
-              .doc(booking['houseId'])
-              .get();
-          
-          if (houseDoc.exists) {
-            house = houseDoc.data();
-            house!['id'] = houseDoc.id;
+    // Simple start editing - just use booking data
+    void startEditing() {
+      // Helper function to parse dates from various formats
+      DateTime? parseDate(dynamic date) {
+        if (date == null) return null;
+        if (date is Timestamp) return date.toDate();
+        if (date is String) {
+          try {
+            return DateTime.parse(date);
+          } catch (e) {
+            return null;
           }
         }
-        
-        // If no house found by ID, try to find by owner and address
-        if (house == null && booking['ownerUsername'] != null && booking['houseAddress'] != null) {
-          final housesSnapshot = await FirebaseFirestore.instance
-              .collection('Houses')
-              .where('ownerUsername', isEqualTo: booking['ownerUsername'])
-              .where('address', isEqualTo: booking['houseAddress'])
-              .limit(1)
-              .get();
-          
-          if (housesSnapshot.docs.isNotEmpty) {
-            house = housesSnapshot.docs.first.data();
-            house['id'] = housesSnapshot.docs.first.id;
-          }
-        }
-        
-        return house;
-      } catch (e) {
         return null;
       }
+      
+      setState(() {
+        _isEditingBooking = true;
+        
+        // Initialize editing values with current booking data
+        _quantityController.text = booking['quantity']?.toString() ?? '';
+        _specialRequestsController.text = booking['specialRequests']?.toString() ?? '';
+        
+        _editingCheckIn = parseDate(booking['checkIn']) ?? DateTime.now();
+        _editingCheckOut = parseDate(booking['checkOut']) ?? DateTime.now().add(const Duration(days: 1));
+        
+        _editingPaymentMethod = booking['paymentMethod']?.toString();
+        _editingUsePickupService = booking['usePickupService'] == true;
+      });
     }
 
     showDialog(
@@ -672,7 +668,7 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                           const Text('Store Date:', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           InkWell(
-                            onTap: () => _selectDate(true),
+                            onTap: () => selectDate(true),
                             child: Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
@@ -699,7 +695,7 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                           const Text('Pickup Date:', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           InkWell(
-                            onTap: () => _selectDate(false),
+                            onTap: () => selectDate(false),
                             child: Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
@@ -733,6 +729,10 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                                 border: OutlineInputBorder(),
                                 suffixText: 'items',
                               ),
+                              onChanged: (value) {
+                                // Trigger dialog state update when quantity changes
+                                setDialogState(() {});
+                              },
                               validator: (value) {
                                 if (value == null || value.isEmpty) return 'Please enter quantity';
                                 final quantity = int.tryParse(value);
@@ -746,10 +746,10 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                         ],
                         
                         // Pickup Service - Editable in edit mode
-                        if (_currentHouse?['offerPickupService'] == true && _isEditingBooking) ...[
+                        if (_isEditingBooking) ...[
                           CheckboxListTile(
                             title: const Text('Use Pickup Service'),
-                            subtitle: Text('Additional cost: RM${_currentHouse?['pickupServiceCost'] ?? '50'}'),
+                            subtitle: Text('Additional cost: RM${(booking['pickupServiceCost'] != null ? double.tryParse(booking['pickupServiceCost'].toString()) ?? 0.0 : 0.0).toStringAsFixed(0)}'),
                             value: _editingUsePickupService,
                             onChanged: (value) {
                               setDialogState(() {
@@ -763,7 +763,7 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                           _buildDetailRow('Pickup Service', 'Yes'),
                         
                         // Payment Method - Editable in edit mode
-                        if (_isEditingBooking && _currentHouse != null) ...[
+                        if (_isEditingBooking) ...[
                           const Text('Payment Method:', style: TextStyle(fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           DropdownButtonFormField<String>(
@@ -771,7 +771,7 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                               border: OutlineInputBorder(),
                             ),
                             value: _editingPaymentMethod,
-                            items: _getAvailablePaymentMethods(_currentHouse).map<DropdownMenuItem<String>>((method) {
+                            items: ['Cash', 'Online Banking', 'E-Wallet'].map<DropdownMenuItem<String>>((method) {
                               return DropdownMenuItem(value: method, child: Text(method));
                             }).toList(),
                             onChanged: (value) {
@@ -788,7 +788,43 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                         // Pricing Details
                         if (booking['priceBreakdown'] != null)
                           _buildDetailRow('Price Breakdown', booking['priceBreakdown'].toString()),
-                        _buildDetailRow('Total Price', 'RM${booking['totalPrice']?.toString() ?? '0'}'),
+                        
+                        // Show updated total price in edit mode
+                        if (_isEditingBooking) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Updated Price:',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _generatePriceBreakdown(booking, _calculateUpdatedPrice(booking)),
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Total: RM${_calculateUpdatedPrice(booking).toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: Colors.green,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ] else
+                          _buildDetailRow('Total Price', 'RM${booking['totalPrice']?.toString() ?? '0'}'),
                         
                         // Special Requests - Editable in edit mode
                         if (_isEditingBooking) ...[
@@ -853,16 +889,9 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
                               children: [
                                 Expanded(
                                   child: OutlinedButton.icon(
-                                    onPressed: () async {
-                                      final house = await _fetchHouseData();
-                                      if (house != null) {
-                                        _startEditingBooking(booking, house);
-                                        setDialogState(() {});
-                                      } else {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Could not load house data for editing')),
-                                        );
-                                      }
+                                    onPressed: () {
+                                      startEditing();
+                                      setDialogState(() {});
                                     },
                                     icon: const Icon(Icons.edit),
                                     label: const Text('Edit'),
@@ -991,6 +1020,22 @@ class _CustDashboardContentState extends State<CustDashboardContent> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Refresh button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: () {
+                  setState(() {
+                    _housesFuture = _fetchHouses();
+                  });
+                  _loadBookings();
+                },
+                tooltip: 'Refresh',
+              ),
+            ],
+          ),
             // Show bookings at the top if any exist
             if (_bookings.isNotEmpty) ...[
               const Text(
