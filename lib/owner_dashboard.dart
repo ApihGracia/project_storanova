@@ -220,26 +220,55 @@ class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
     }
   }
 
+  // Helper method to retry Firestore operations with exponential backoff
+  Future<T?> _retryFirestoreOperation<T>(Future<T> Function() operation, {int maxRetries = 3}) async {
+    int retryCount = 0;
+    while (retryCount < maxRetries) {
+      try {
+        return await operation();
+      } catch (e) {
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          print('Firestore operation failed after $maxRetries attempts: $e');
+          return null;
+        }
+        // Exponential backoff: wait 1s, then 2s, then 4s
+        await Future.delayed(Duration(seconds: 1 << (retryCount - 1)));
+        print('Retrying Firestore operation (attempt $retryCount/$maxRetries)...');
+      }
+    }
+    return null;
+  }
+
   Future<String?> _getUsernameFromFirestore() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
+    
     // Try to get username from AppUsers by UID, then by email, then by displayName
     DocumentSnapshot? userDoc;
     if (user.uid.isNotEmpty) {
-      userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(user.uid).get();
-      if (userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
+      userDoc = await _retryFirestoreOperation(() => 
+        FirebaseFirestore.instance.collection('AppUsers').doc(user.uid).get()
+      );
+      if (userDoc != null && userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
         return (userDoc.data() as Map<String, dynamic>)['username'];
       }
     }
+    
     if (user.email != null && user.email!.isNotEmpty) {
-      final query = await FirebaseFirestore.instance.collection('AppUsers').where('email', isEqualTo: user.email).limit(1).get();
-      if (query.docs.isNotEmpty && query.docs.first.data()['username'] != null) {
+      final query = await _retryFirestoreOperation(() => 
+        FirebaseFirestore.instance.collection('AppUsers').where('email', isEqualTo: user.email).limit(1).get()
+      );
+      if (query != null && query.docs.isNotEmpty && query.docs.first.data()['username'] != null) {
         return query.docs.first.data()['username'];
       }
     }
+    
     if (user.displayName != null && user.displayName!.isNotEmpty) {
-      userDoc = await FirebaseFirestore.instance.collection('AppUsers').doc(user.displayName).get();
-      if (userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
+      userDoc = await _retryFirestoreOperation(() => 
+        FirebaseFirestore.instance.collection('AppUsers').doc(user.displayName).get()
+      );
+      if (userDoc != null && userDoc.exists && userDoc.data() != null && (userDoc.data() as Map<String, dynamic>)['username'] != null) {
         return (userDoc.data() as Map<String, dynamic>)['username'];
       }
       return user.displayName;
@@ -402,7 +431,10 @@ class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
     final username = await _getUsernameFromFirestore();
     if (username == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not found. Please log in again.')),
+        const SnackBar(
+          content: Text('Unable to retrieve user information. Please check your internet connection and try again.'),
+          duration: Duration(seconds: 4),
+        ),
       );
       return;
     }

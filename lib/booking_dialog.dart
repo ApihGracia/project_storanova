@@ -402,10 +402,14 @@ class _BookingDialogState extends State<BookingDialog> {
         }
 
         // Update the booking in Firestore
-        await FirebaseFirestore.instance
-            .collection('Bookings')
-            .doc(widget.booking!['id'])
-            .update(updatedBookingData);
+        try {
+          await FirebaseFirestore.instance
+              .collection('Bookings')
+              .doc(widget.booking!['id'])
+              .update(updatedBookingData);
+        } catch (e) {
+          throw Exception('Unable to update booking. Please check your internet connection and try again.');
+        }
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Booking updated successfully!')),
@@ -415,11 +419,16 @@ class _BookingDialogState extends State<BookingDialog> {
         final user = FirebaseAuth.instance.currentUser;
         if (user == null) throw Exception('User not logged in');
 
-        final usersSnapshot = await FirebaseFirestore.instance
-            .collection('AppUsers')
-            .where('email', isEqualTo: user.email)
-            .limit(1)
-            .get();
+        QuerySnapshot? usersSnapshot;
+        try {
+          usersSnapshot = await FirebaseFirestore.instance
+              .collection('AppUsers')
+              .where('email', isEqualTo: user.email)
+              .limit(1)
+              .get();
+        } catch (e) {
+          throw Exception('Unable to connect to database. Please check your internet connection and try again.');
+        }
 
         if (usersSnapshot.docs.isEmpty) throw Exception('User not found');
         final username = usersSnapshot.docs.first.id;

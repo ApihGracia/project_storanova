@@ -5,6 +5,26 @@ class DatabaseService {
   final CollectionReference houseApplicationsCollection = FirebaseFirestore.instance.collection('HouseApplications');
   final CollectionReference approvedHousesCollection = FirebaseFirestore.instance.collection('ApprovedHouses');
 
+  // Helper method to retry Firestore operations with exponential backoff
+  Future<T?> _retryFirestoreOperation<T>(Future<T> Function() operation, {int maxRetries = 3}) async {
+    int retryCount = 0;
+    while (retryCount < maxRetries) {
+      try {
+        return await operation();
+      } catch (e) {
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          print('Firestore operation failed after $maxRetries attempts: $e');
+          rethrow; // Re-throw the error on final failure
+        }
+        // Exponential backoff: wait 1s, then 2s, then 4s
+        await Future.delayed(Duration(seconds: 1 << (retryCount - 1)));
+        print('Retrying Firestore operation (attempt $retryCount/$maxRetries)...');
+      }
+    }
+    return null;
+  }
+
   // CREATE: Save user info to Firestore with username as document ID
   Future<void> createUser({
     required String username,
@@ -14,7 +34,7 @@ class DatabaseService {
     String? phone,
     String? profileImageUrl,
   }) async {
-    await usersCollection.doc(username).set({
+    await _retryFirestoreOperation(() => usersCollection.doc(username).set({
       'username': username,
       'email': email,
       'role': role,
@@ -22,15 +42,15 @@ class DatabaseService {
       if (name != null) 'name': name,
       if (phone != null) 'phone': phone,
       if (profileImageUrl != null) 'profileImageUrl': profileImageUrl,
-    });
+    }));
   }
 
   // READ: Get user document by username (username is now the document ID)
   Future<DocumentSnapshot?> getUserByUsername(String username) async {
     print("DatabaseService: Getting user document for username: $username");
     try {
-      final doc = await usersCollection.doc(username).get();
-      if (doc.exists) {
+      final doc = await _retryFirestoreOperation(() => usersCollection.doc(username).get());
+      if (doc != null && doc.exists) {
         print("DatabaseService: Found user document for $username");
         return doc;
       } else {
