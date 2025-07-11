@@ -1352,4 +1352,30 @@ class DatabaseService {
       }
     }
   }
+
+  // Utility method for parsing datetime from either string or Firestore Timestamp
+  static DateTime parseDateTime(dynamic dateValue) {
+    if (dateValue == null) {
+      return DateTime.now(); // Fallback to current time
+    }
+    
+    if (dateValue is Timestamp) {
+      // Handle Firestore Timestamp
+      return dateValue.toDate();
+    } else if (dateValue is String) {
+      // Handle ISO8601 string
+      try {
+        return DateTime.parse(dateValue);
+      } catch (e) {
+        print('Error parsing date string: $dateValue, error: $e');
+        return DateTime.now(); // Fallback to current time
+      }
+    } else if (dateValue is DateTime) {
+      // Already a DateTime object
+      return dateValue;
+    } else {
+      print('Unknown date format: $dateValue (${dateValue.runtimeType})');
+      return DateTime.now(); // Fallback to current time
+    }
+  }
 }

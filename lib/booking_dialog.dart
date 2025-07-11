@@ -40,8 +40,8 @@ class _BookingDialogState extends State<BookingDialog> {
     if (widget.booking != null) {
       // Edit mode - pre-fill with existing booking data
       try {
-        _checkInDate = DateTime.parse(widget.booking!['checkIn']);
-        _checkOutDate = DateTime.parse(widget.booking!['checkOut']);
+        _checkInDate = DatabaseService.parseDateTime(widget.booking!['checkIn']);
+        _checkOutDate = DatabaseService.parseDateTime(widget.booking!['checkOut']);
       } catch (e) {
         _checkInDate = DateTime.now();
         _checkOutDate = DateTime.now().add(const Duration(days: 1));

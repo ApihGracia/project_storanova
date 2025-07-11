@@ -445,7 +445,7 @@ class CompactNotificationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isRead = notification['isRead'] ?? false;
     final type = notification['type'] as String;
-    final createdAt = DateTime.parse(notification['createdAt']);
+    final createdAt = DatabaseService.parseDateTime(notification['createdAt']);
     
     Color iconColor;
     IconData icon;
@@ -666,7 +666,7 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
   @override
   Widget build(BuildContext context) {
     final type = widget.notification['type'] as String;
-    final createdAt = DateTime.parse(widget.notification['createdAt']);
+    final createdAt = DatabaseService.parseDateTime(widget.notification['createdAt']);
 
     Color backgroundColor;
     Color borderColor;
@@ -824,8 +824,8 @@ class _NotificationDetailsDialogState extends State<NotificationDetailsDialog> {
                                 },
                               ),
                               _buildBookingDetailRow('House Address', _bookingDetails!['houseAddress'] ?? 'N/A'),
-                              _buildBookingDetailRow('Store Date', _formatDate(DateTime.parse(_bookingDetails!['checkIn']))),
-                              _buildBookingDetailRow('Pickup Date', _formatDate(DateTime.parse(_bookingDetails!['checkOut']))),
+                              _buildBookingDetailRow('Store Date', _formatDate(DatabaseService.parseDateTime(_bookingDetails!['checkIn']))),
+                              _buildBookingDetailRow('Pickup Date', _formatDate(DatabaseService.parseDateTime(_bookingDetails!['checkOut']))),
                               if (_bookingDetails!['quantity'] != null)
                                 _buildBookingDetailRow('Quantity', '${_bookingDetails!['quantity']} items'),
                               _buildBookingDetailRow('Total Price', 'RM${_bookingDetails!['totalPrice']?.toString() ?? '0'}'),
