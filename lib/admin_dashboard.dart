@@ -12,7 +12,7 @@ class AdminHomePage extends StatefulWidget {
 
 class _AdminHomePageState extends State<AdminHomePage> {
   int _currentIndex = 0;
-  final GlobalKey<_StatisticsPageState> _statisticsKey = GlobalKey();
+  final GlobalKey<_StatisticsPageState> _statisticsKey = GlobalKey<_StatisticsPageState>();
 
   void _refreshStatistics() {
     _statisticsKey.currentState?._loadStatistics();

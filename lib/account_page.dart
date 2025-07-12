@@ -6,10 +6,9 @@ import 'shared_widgets.dart';
 import 'main.dart';
 
 class AccountPage extends StatefulWidget {
-  final String userRole; // 'customer' or 'owner'
-  
+  final String userRole;
   const AccountPage({Key? key, required this.userRole}) : super(key: key);
-  
+
   @override
   _AccountPageState createState() => _AccountPageState();
 }
@@ -18,6 +17,7 @@ class _AccountPageState extends State<AccountPage> {
   final DatabaseService _db = DatabaseService();
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
+  bool _isDeleting = false;
   String? _username;
 
   @override
@@ -31,7 +31,6 @@ class _AccountPageState extends State<AccountPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // Get username from email
       final usersSnapshot = await FirebaseFirestore.instance
           .collection('AppUsers')
           .where('email', isEqualTo: user.email)
@@ -41,21 +40,29 @@ class _AccountPageState extends State<AccountPage> {
       if (usersSnapshot.docs.isNotEmpty) {
         _username = usersSnapshot.docs.first.id;
         final userDoc = await _db.getUserByUsername(_username!);
-        
+
         if (userDoc != null && userDoc.exists) {
-          setState(() {
-            _userData = userDoc.data() as Map<String, dynamic>;
-            _isLoading = false;
+          if (!mounted) return;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _userData = userDoc.data() as Map<String, dynamic>;
+                _isLoading = false;
+              });
+            }
           });
         }
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading account data: $e')),
+        );
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading account data: $e')),
-      );
     }
   }
 
@@ -101,26 +108,24 @@ class _AccountPageState extends State<AccountPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Account'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Are you sure you want to permanently delete your account?',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 12),
-            Text('This action will:'),
-            SizedBox(height: 8),
-            Text('• Delete all your personal data'),
-            Text('• Cancel all pending bookings'),
-            Text('• Remove your account permanently'),
-            SizedBox(height: 12),
-            Text(
-              'This action cannot be undone!',
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Are you sure you want to permanently delete your account?',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 12),
+              Text('This action will:'),
+              SizedBox(height: 8),
+              Text('• Delete all your personal data'),
+              Text('• Cancel all pending bookings'),
+              Text('• Remove your account permanently'),
+              SizedBox(height: 12),
+              Text('This action cannot be undone!',
+                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -137,78 +142,61 @@ class _AccountPageState extends State<AccountPage> {
     );
 
     if (confirmed == true) {
-      try {
-        final user = FirebaseAuth.instance.currentUser;
-        if (user == null) {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('No user logged in'), backgroundColor: Colors.red),
           );
-          return;
         }
+        return;
+      }
 
-        // Get password for reauthentication
-        final password = await _showPasswordDialog();
-        if (password == null || password.isEmpty) {
+      final password = await _showPasswordDialog();
+      if (password == null || password.isEmpty) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Password required for account deletion'), backgroundColor: Colors.red),
           );
-          return;
         }
+        return;
+      }
 
-        // Show loading dialog
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const AlertDialog(
-            content: Row(
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(width: 16),
-                Text('Deleting account...'),
-              ],
-            ),
-          ),
-        );
-
-        // Reauthenticate user before deletion
+      if (mounted) setState(() { _isDeleting = true; });
+      bool deletionSuccess = false;
+      String? errorMessage;
+      try {
         final credential = EmailAuthProvider.credential(
           email: user.email!,
           password: password,
         );
         await user.reauthenticateWithCredential(credential);
-
-        // Delete user data from Firestore - Complete deletion from all collections
         if (_username != null) {
-          // Use the comprehensive deletion function
           await _db.deleteUserCompletely(_username!);
         }
-
-        // Delete Firebase Auth account
         await user.delete();
-
-        // Close loading dialog
-        Navigator.of(context).pop();
-
-        // Navigate to login page
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginPage()),
-          (route) => false,
-        );
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Account deleted successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        deletionSuccess = true;
       } catch (e) {
-        Navigator.of(context).pop(); // Close loading dialog
+        errorMessage = e.toString();
+      }
+      if (mounted) setState(() { _isDeleting = false; });
+      if (deletionSuccess && mounted) {
+        Future.microtask(() {
+          if (mounted) {
+            Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
+            Future.microtask(() {
+              if (mounted) {
+                Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const LoginPage()),
+                  (route) => false,
+                );
+              }
+            });
+          }
+        });
+      } else if (errorMessage != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error deleting account: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Error deleting account: $errorMessage'), backgroundColor: Colors.red),
         );
       }
     }
@@ -239,27 +227,13 @@ class _AccountPageState extends State<AccountPage> {
         children: [
           SizedBox(
             width: 120,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-                fontSize: 14,
-              ),
-            ),
+            child: Text(label,
+              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 14)),
           ),
-          const Text(
-            ': ',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
+          const Text(': ', style: TextStyle(fontWeight: FontWeight.bold)),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.black87,
-              ),
-            ),
+            child: Text(value,
+              style: const TextStyle(fontSize: 14, color: Colors.black87)),
           ),
         ],
       ),
@@ -269,142 +243,113 @@ class _AccountPageState extends State<AccountPage> {
   @override
   Widget build(BuildContext context) {
     Widget appBar;
-    
-    // Choose appropriate navigation based on user role
     switch (widget.userRole.toLowerCase()) {
       case 'owner':
         appBar = OwnerAppBar(title: 'Account', showBackButton: true, showMenuIcon: false);
         break;
-      default: // customer
+      default:
         appBar = CustomerAppBar(title: 'Account', showBackButton: true, showMenuIcon: false);
         break;
     }
 
     return Scaffold(
       appBar: appBar as PreferredSizeWidget,
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Account Information Card
-                  Card(
-                    elevation: 2,
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.account_circle,
-                                size: 32,
-                                color: Color(0xFF1976D2),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Account Information',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 24),
-                          
-                          if (_userData != null) ...[
-                            _buildInfoRow('Username', _username ?? 'N/A'),
-                            _buildInfoRow('Name', _userData!['name']?.toString() ?? 'N/A'),
-                            _buildInfoRow('Email', _userData!['email']?.toString() ?? 'N/A'),
-                            _buildInfoRow('Phone', _userData!['phone']?.toString() ?? 'N/A'),
-                            _buildInfoRow('Role', _userData!['role']?.toString().toUpperCase() ?? 'N/A'),
-                            _buildInfoRow('Date Joined', _formatDate(_userData!['createdAt'])),
-                            
-                            if (_userData!['address'] != null && _userData!['address'].toString().isNotEmpty)
-                              _buildInfoRow('Address', _userData!['address'].toString()),
-                          ] else ...[
-                            const Center(
-                              child: Text(
-                                'Unable to load account information',
-                                style: TextStyle(color: Colors.grey),
-                              ),
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Card(
+                      elevation: 2,
+                      color: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: const [
+                                Icon(Icons.account_circle, size: 32, color: Color(0xFF1976D2)),
+                                SizedBox(width: 12),
+                                Text('Account Information',
+                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                              ],
                             ),
+                            const SizedBox(height: 24),
+                            if (_userData != null) ...[
+                              _buildInfoRow('Username', _username ?? 'N/A'),
+                              _buildInfoRow('Name', _userData!['name']?.toString() ?? 'N/A'),
+                              _buildInfoRow('Email', _userData!['email']?.toString() ?? 'N/A'),
+                              _buildInfoRow('Phone', _userData!['phone']?.toString() ?? 'N/A'),
+                              _buildInfoRow('Role', _userData!['role']?.toString().toUpperCase() ?? 'N/A'),
+                              _buildInfoRow('Date Joined', _formatDate(_userData!['createdAt'])),
+                              if (_userData!['address'] != null && _userData!['address'].toString().isNotEmpty)
+                                _buildInfoRow('Address', _userData!['address'].toString()),
+                            ] else ...[
+                              const Center(child: Text('Unable to load account information', style: TextStyle(color: Colors.grey))),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Danger Zone Card
-                  Card(
-                    elevation: 2,
-                    color: Colors.red.shade50,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.red.shade200),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.warning,
-                                size: 32,
-                                color: Colors.red.shade700,
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Danger Zone',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.red.shade700,
+                    const SizedBox(height: 24),
+                    Card(
+                      elevation: 2,
+                      color: Colors.red.shade50,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.red.shade200),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.warning, size: 32, color: Colors.red.shade700),
+                                const SizedBox(width: 12),
+                                Text('Danger Zone',
+                                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red.shade700)),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Permanently delete your account and all associated data. This action cannot be undone.',
+                              style: TextStyle(color: Colors.red.shade700, fontSize: 14),
+                            ),
+                            const SizedBox(height: 16),
+                          _isDeleting
+                              ? const Center(child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  child: CircularProgressIndicator(),
+                                ))
+                              : SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _deleteAccount,
+                                    icon: const Icon(Icons.delete_forever),
+                                    label: const Text('Delete Account Permanently'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Permanently delete your account and all associated data. This action cannot be undone.',
-                            style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _deleteAccount,
-                              icon: const Icon(Icons.delete_forever),
-                              label: const Text('Delete Account Permanently'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                              ),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+      ),
     );
   }
 }

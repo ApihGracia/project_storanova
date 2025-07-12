@@ -71,6 +71,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? address;
   String? username;
   bool isLoading = true;
+  // ...existing code...
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();

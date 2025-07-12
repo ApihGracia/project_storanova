@@ -145,6 +145,7 @@ class _OwnerDashboardContentState extends State<OwnerDashboardContent> {
   House? _house;
   bool _isLoading = true;
   bool _showHouseForm = false;
+  // ...existing code...
   final _houseFormKey = GlobalKey<FormState>();
   final TextEditingController _houseAddressController = TextEditingController();
   final TextEditingController _housePhoneController = TextEditingController();
