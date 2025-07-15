@@ -1,16 +1,36 @@
-# project_storanova
+# 📱 project_storanova
 
-A new Flutter project.
+Mobile application built with Flutter & Firebase.
 
-## Getting Started
+## 📦 Prerequisites
 
-This project is a starting point for a Flutter application.
+Make sure you have the following installed:
 
-A few resources to get you started if this is your first Flutter project:
+- ✅ Flutter SDK (Recommended: >=3.10.0)
+- ✅ Dart SDK
+- ✅ Git
+- ✅ Android Studio or VS Code
+- ✅ Firebase CLI (optional for advanced features)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+To check your Flutter version:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+flutter --version
+```
+
+It is recommended to clone this repository on c:/flutter_project
+
+After cloning this repository
+
+1.  Go to terminal and set directory
+    ```bash
+    cd flutter_project/project_storanova
+    ```
+2.  Download and install all dependencies
+    ```bash
+    flutter pub get
+    ```
+3.  Run the project
+    ```bash
+    flutter run
+    ```
